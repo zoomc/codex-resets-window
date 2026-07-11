@@ -63,12 +63,32 @@ struct MenuContent: View {
                 Text(model.errorMessage ?? "正在读取用量…")
             }
             Divider()
+            HStack {
+                Text("本地 Codex 对话").font(.headline)
+                Spacer()
+                Text("\(model.sessions.count)").font(.caption).foregroundStyle(.secondary)
+            }
+            if model.sessions.isEmpty {
+                Text("尚未找到本地会话索引")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 8) {
+                        ForEach(model.sessions) { session in
+                            SessionRow(session: session, model: model)
+                        }
+                    }
+                }
+                .frame(maxHeight: 390)
+            }
+            Divider()
             Button("打开 Codex Window") { NSApp.activate(ignoringOtherApps: true) }
             Button("刷新") { Task { await model.refresh() } }
             Button("退出") { NSApp.terminate(nil) }
         }
         .padding()
-        .frame(width: 360)
+        .frame(width: 520)
     }
 }
 
