@@ -11,6 +11,7 @@ Codex Window is a native macOS menu-bar companion for Codex usage. It presents t
 - Scheduled resume invokes the same executable with `exec resume <session-id> "continue"` so the selected session receives a new English continuation prompt.
 - The top-bar countdown uses a lightweight SwiftUI `TimelineView`; it does not poll the network. Network refresh happens when the popover appears or the refresh button is clicked.
 - `Resources/AppIcon.svg` is the editable source for the bundled `.icns` app icon.
+- Usage cards use brighter pastel accents, while session switches remain compact; enabling a switch shows the scheduled `Start at HH:MM` line beneath it.
 
 ## Development
 

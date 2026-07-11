@@ -151,17 +151,18 @@ struct MenuContent: View {
                 Spacer()
                 Button { Task { await model.refresh() } } label: {
                     Image(systemName: "arrow.clockwise.circle.fill")
-                        .font(.title3)
+                        .font(.title2)
                 }
                 .buttonStyle(.plain)
+                .frame(width: 30, height: 30)
                 .help("Refresh usage and sessions")
                 .accessibilityLabel("Refresh usage and sessions")
             }
 
             if let usage = model.usage {
                 HStack(spacing: 8) {
-                    UsageMiniCard(title: "5 hours", window: usage.primary, accent: Color(red: 0.36, green: 0.58, blue: 0.50))
-                    UsageMiniCard(title: "Weekly", window: usage.secondary, accent: Color(red: 0.50, green: 0.47, blue: 0.64))
+                    UsageMiniCard(title: "5 hours", window: usage.primary, accent: Color(red: 0.38, green: 0.74, blue: 0.61))
+                    UsageMiniCard(title: "Weekly", window: usage.secondary, accent: Color(red: 0.66, green: 0.58, blue: 0.88))
                 }
             } else {
                 Text(model.errorMessage ?? "Loading usage…")
@@ -297,7 +298,7 @@ struct UsageCard: View {
             Text(title).foregroundStyle(.secondary)
             Text("\(window.remainingPercent)% remaining").font(.title.bold())
             ProgressView(value: Double(window.remainingPercent), total: 100)
-                .tint(emphasis ? Color(red: 0.36, green: 0.58, blue: 0.50) : Color(red: 0.50, green: 0.47, blue: 0.64))
+                .tint(emphasis ? Color(red: 0.38, green: 0.74, blue: 0.61) : Color(red: 0.66, green: 0.58, blue: 0.88))
             Text("Resets \(window.resetText)")
                 .font(.footnote).foregroundStyle(.secondary)
         }
@@ -334,10 +335,11 @@ struct SessionRow: View {
                     set: { model.scheduler.setEnabled($0, for: session, resetAt: model.usage?.primary.resetAt) }
                 ))
                 .toggleStyle(.switch)
+                .controlSize(.small)
                 .labelsHidden()
                 .accessibilityLabel("Continue \(session.displayName) after reset")
                 if model.scheduler.isEnabled(session), let continuation = model.scheduler.continuationDate(resetAt: model.usage?.primary.resetAt) {
-                    Text("Task continues \(englishTime(continuation))")
+                    Text("Start at \(englishTime(continuation))")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
