@@ -9,6 +9,8 @@ Codex Resets Window is a native macOS menu-bar companion for Codex usage. It pre
 - Does not upload, store, display, or commit access tokens, account IDs, email addresses, conversation content, or raw API responses.
 - Clicking a title opens `<ChatGPT.app>/Contents/Resources/codex resume <session-id>` in Terminal (falling back to `codex` on PATH).
 - Scheduled resume reads only the matching local session metadata to recover its original working directory, then invokes the bundled CLI as `codex -C <original-cwd> exec resume <session-id> "continue"`. This preserves the repository context while sending the selected session a new English continuation prompt.
+- Every scheduled child process is retained and observed while the menu-bar app is running. Its local stdout/stderr updates the session's compact status line; normal completion or a non-zero exit is displayed and notified. Only the most recent 120-character output line stays in memory and it is never uploaded or written to the repository.
+- Clicking a title opens the matching Codex Desktop task with the local `codex://threads/<session-id>` URL scheme.
 - The top-bar countdown uses a lightweight SwiftUI `TimelineView`; it does not poll the network. Network refresh happens when the popover appears or the refresh button is clicked.
 - `Resources/AppIcon.svg` is the editable source for the bundled `.icns` app icon.
 - Usage cards use brighter pastel accents, while session switches remain compact; enabling a switch shows the scheduled `Start at HH:MM` line beneath it.

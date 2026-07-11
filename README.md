@@ -30,6 +30,9 @@ Codex Resets Window puts the useful state in one small, always-available popover
 - Lets you enable automatic continuation per session with a compact switch.
 - Shows `Start at HH:MM` only while a session switch is enabled.
 - Five minutes after the 5-hour reset, recovers the session's original local working directory and runs `codex -C <original-cwd> exec resume <session-id> "continue"`.
+- Tracks each launched continuation as `Queued`, `Starting`, `Running`, `Completed`, or `Failed`, with a local last-output preview and exit code when available.
+- Sends a local notification both when a continuation starts and when it finishes or fails.
+- Opens the matching Codex Desktop task through its `codex://threads/<session-id>` link when a title is clicked.
 - Uses a lightweight local countdown without network polling.
 
 ## Privacy by design

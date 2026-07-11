@@ -1,5 +1,48 @@
 import Foundation
 
+enum ResumeRunState: String, Sendable {
+    case queued
+    case starting
+    case running
+    case succeeded
+    case failed
+
+    var label: String {
+        switch self {
+        case .queued: "Queued"
+        case .starting: "Starting"
+        case .running: "Running"
+        case .succeeded: "Completed"
+        case .failed: "Failed"
+        }
+    }
+}
+
+struct ResumeActivity: Equatable, Sendable {
+    let state: ResumeRunState
+    let scheduledAt: Date?
+    let startedAt: Date?
+    let finishedAt: Date?
+    let lastOutput: String?
+    let exitCode: Int32?
+
+    init(
+        state: ResumeRunState,
+        scheduledAt: Date? = nil,
+        startedAt: Date? = nil,
+        finishedAt: Date? = nil,
+        lastOutput: String? = nil,
+        exitCode: Int32? = nil
+    ) {
+        self.state = state
+        self.scheduledAt = scheduledAt
+        self.startedAt = startedAt
+        self.finishedAt = finishedAt
+        self.lastOutput = lastOutput
+        self.exitCode = exitCode
+    }
+}
+
 struct UsageWindow: Codable, Equatable, Sendable {
     let limitWindowSeconds: TimeInterval
     let resetAfterSeconds: TimeInterval

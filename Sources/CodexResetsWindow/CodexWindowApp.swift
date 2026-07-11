@@ -357,16 +357,65 @@ struct SessionRow: View {
                 .controlSize(.small)
                 .labelsHidden()
                 .accessibilityLabel("Continue \(session.displayName) after reset")
-                if scheduler.isEnabled(session), let continuation = scheduler.continuationDate(resetAt: model.usage?.primary.resetAt) {
-                    Text("Start at \(englishTime(continuation))")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                if scheduler.isEnabled(session), let activity = scheduler.activity(for: session) {
+                    ResumeActivityView(activity: activity)
                 }
             }
         }
         .padding(.horizontal, 9)
         .padding(.vertical, 6)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+    }
+}
+
+struct ResumeActivityView: View {
+    let activity: ResumeActivity
+
+    private var tint: Color {
+        switch activity.state {
+        case .queued: .secondary
+        case .starting, .running: .orange
+        case .succeeded: .green
+        case .failed: .red
+        }
+    }
+
+    private var statusText: String {
+        switch activity.state {
+        case .queued:
+            return activity.scheduledAt.map { "Start at \(englishTime($0))" } ?? "Queued"
+        case .starting:
+            return "Starting…"
+        case .running:
+            return activity.startedAt.map { "Running since \(englishTime($0))" } ?? "Running"
+        case .succeeded:
+            return activity.finishedAt.map { "Completed \(englishTime($0))" } ?? "Completed"
+        case .failed:
+            if let exitCode = activity.exitCode { return "Failed (exit \(exitCode))" }
+            return "Failed"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 1) {
+            HStack(spacing: 3) {
+                Circle().fill(tint).frame(width: 5, height: 5)
+                Text(statusText)
+            }
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(tint)
+
+            if let output = activity.lastOutput, activity.state != .queued {
+                Text(output)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .frame(maxWidth: 175, alignment: .trailing)
+                    .help(output)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Continuation \(statusText)")
     }
 }
 
