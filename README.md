@@ -29,7 +29,7 @@ Codex Resets Window puts the useful state in one small, always-available popover
 - Opens a session when its title area is clicked.
 - Lets you enable automatic continuation per session with a compact switch.
 - Shows `Start at HH:MM` only while a session switch is enabled.
-- Five minutes after the 5-hour reset, runs `codex exec resume <session-id> "continue"` in the original session context.
+- Five minutes after the 5-hour reset, recovers the session's original local working directory and runs `codex -C <original-cwd> exec resume <session-id> "continue"`.
 - Uses a lightweight local countdown without network polling.
 
 ## Privacy by design
@@ -46,6 +46,8 @@ swift run CodexResetsWindow
 ```
 
 The installed app bundle is named **Codex Resets Window.app**. The app prefers the working Codex CLI bundled with ChatGPT.app and falls back to the `codex` command on `PATH`.
+
+The continuation route was verified against a real Codex Desktop-originated task: the selected session accepted `continue` and resumed in its original repository. It uses the normal local CLI process and does not require Accessibility or screen-control permission.
 
 ## Project notes
 

@@ -62,9 +62,12 @@ final class ResumeScheduler: ObservableObject {
     private func resume(_ session: CodexSession) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: codexExecutable)
+        let workingDirectoryArguments = originalWorkingDirectory(for: session.id)
+            .map { ["-C", $0.path] } ?? []
+        let command = ["exec", "resume", session.id, "continue"]
         process.arguments = codexExecutable == "/usr/bin/env"
-            ? ["codex", "exec", "resume", session.id, "continue"]
-            : ["exec", "resume", session.id, "continue"]
+            ? ["codex"] + workingDirectoryArguments + command
+            : workingDirectoryArguments + command
         try? process.run()
 
         let content = UNMutableNotificationContent()
@@ -72,5 +75,31 @@ final class ResumeScheduler: ObservableObject {
         content.body = "Sent continue to the selected Codex session."
         content.sound = .default
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: session.id, content: content, trigger: nil))
+    }
+
+    /// A resumed session must start in the same repository as its original task.
+    /// Codex keeps this private, local metadata beside the session transcript.
+    private func originalWorkingDirectory(for sessionID: String) -> URL? {
+        let sessionsRoot = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".codex/sessions", isDirectory: true)
+        guard let enumerator = FileManager.default.enumerator(
+            at: sessionsRoot,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return nil }
+
+        for case let fileURL as URL in enumerator {
+            guard fileURL.lastPathComponent.contains(sessionID),
+                  fileURL.pathExtension == "jsonl",
+                  let handle = try? FileHandle(forReadingFrom: fileURL),
+                  let firstLine = try? handle.read(upToCount: 16_384),
+                  let object = try? JSONSerialization.jsonObject(with: firstLine) as? [String: Any],
+                  let payload = object["payload"] as? [String: Any],
+                  let path = payload["cwd"] as? String,
+                  FileManager.default.fileExists(atPath: path) else { continue }
+            defer { try? handle.close() }
+            return URL(fileURLWithPath: path, isDirectory: true)
+        }
+        return nil
     }
 }

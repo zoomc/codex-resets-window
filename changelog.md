@@ -16,3 +16,5 @@
 - Enabled rows now show `Start at HH:MM` beneath the switch.
 - Removed the redundant `Remaining` label, enlarged reset metadata, and changed Weekly reset metadata to a calendar date.
 - Fixed session-row observation so `Start at HH:MM` appears immediately when a switch is turned on.
+- Hardened scheduled continuation: recover each session's original local working directory from its private session metadata and pass it with `-C` to `codex exec resume`, preventing an automatic `continue` from starting in the menu-bar app's unrelated directory.
+- Verified the CLI continuation flow against a real Codex Desktop-originated local task: the selected session received `continue` and resumed in its original repository without requiring Accessibility permission.
