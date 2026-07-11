@@ -108,7 +108,7 @@ struct MenuContent: View {
                         }
                     }
                 }
-                .frame(maxHeight: 390)
+                .frame(minHeight: 140, maxHeight: 390)
             }
             Divider()
             Button("打开 Codex Window") { NSApp.activate(ignoringOtherApps: true) }

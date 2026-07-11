@@ -59,6 +59,12 @@ struct CodexSession: Identifiable, Codable, Hashable, Sendable {
 
     enum CodingKeys: String, CodingKey { case id, threadName = "thread_name", updatedAt = "updated_at" }
 
+    init(id: String, threadName: String, updatedAt: Date) {
+        self.id = id
+        self.threadName = threadName
+        self.updatedAt = updatedAt
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)

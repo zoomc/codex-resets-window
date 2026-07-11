@@ -45,9 +45,19 @@ actor CodexDataService {
     func loadSessions() -> [CodexSession] {
         let url = home.appending(path: ".codex/session_index.jsonl")
         guard let contents = try? String(contentsOf: url, encoding: .utf8) else { return [] }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return contents.split(separator: "\n").compactMap { try? decoder.decode(CodexSession.self, from: Data($0.utf8)) }
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime]
+        let sessions = contents.split(separator: "\n").compactMap { line -> CodexSession? in
+            guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+                  let id = object["id"] as? String,
+                  let title = object["thread_name"] as? String,
+                  let timestamp = object["updated_at"] as? String,
+                  let updatedAt = fractional.date(from: timestamp) ?? plain.date(from: timestamp) else { return nil }
+            return CodexSession(id: id, threadName: title, updatedAt: updatedAt)
+        }
+        return sessions
             .sorted { $0.updatedAt > $1.updatedAt }
     }
 
