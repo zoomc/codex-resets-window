@@ -92,7 +92,7 @@ struct CodexSession: Identifiable, Codable, Hashable, Sendable {
         updatedAt = parsed
     }
 
-    var displayName: String { threadName.isEmpty ? "未命名对话" : threadName }
+    var displayName: String { threadName.isEmpty ? "Untitled session" : threadName }
 
     var updatedText: String {
         let formatter = DateFormatter()
