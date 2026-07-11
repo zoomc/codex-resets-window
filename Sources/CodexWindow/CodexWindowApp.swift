@@ -9,7 +9,10 @@ struct CodexWindowApp: App {
             MenuContent(model: model)
                 .task { await model.refresh() }
         } label: {
-            Label(model.menuTitle, systemImage: "clock.badge.checkmark")
+            HStack(spacing: 4) {
+                CodexTimerMark(progress: model.usage.map { Double($0.primary.remainingPercent) / 100 } ?? 0)
+                Text(model.menuTitle)
+            }
         }
         .menuBarExtraStyle(.window)
 
@@ -18,6 +21,30 @@ struct CodexWindowApp: App {
                 .task { await model.refresh() }
         }
         .defaultSize(width: 680, height: 720)
+    }
+}
+
+struct CodexTimerMark: View {
+    let progress: Double
+
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            Circle()
+                .stroke(.secondary.opacity(0.25), lineWidth: 1.5)
+            Circle()
+                .trim(from: 0, to: max(0.02, min(1, progress)))
+                .stroke(.tint, style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+            Image(systemName: "sparkles")
+                .font(.system(size: 10, weight: .bold))
+            Image(systemName: "timer")
+                .font(.system(size: 7, weight: .bold))
+                .padding(1.5)
+                .background(.background, in: Circle())
+                .offset(x: 2, y: 2)
+        }
+        .frame(width: 18, height: 18)
+        .accessibilityLabel("Codex 额度计时器")
     }
 }
 
