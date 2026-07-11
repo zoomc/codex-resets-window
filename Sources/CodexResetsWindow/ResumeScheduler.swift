@@ -10,6 +10,7 @@ final class ResumeScheduler: ObservableObject {
     private var timer: Timer?
     private var reconciliationTimer: Timer?
     private var runningProcesses: [String: Process] = [:]
+    private var transcriptObservations: [String: TranscriptObservation] = [:]
     private var continuations: [String: PersistedContinuation]
     private var knownSessions: [CodexSession] = []
 
@@ -18,8 +19,13 @@ final class ResumeScheduler: ObservableObject {
     private let maximumRetention: TimeInterval = 7 * 60 * 60
 
     private var codexExecutable: String {
-        let bundled = "/Applications/ChatGPT.app/Contents/Resources/codex"
-        return FileManager.default.isExecutableFile(atPath: bundled) ? bundled : "/usr/bin/env"
+        let candidates = [
+            "/Applications/Codex.app/Contents/Resources/codex",
+            "/Applications/ChatGPT.app/Contents/Resources/codex",
+            "/opt/homebrew/bin/codex",
+            "/usr/local/bin/codex"
+        ]
+        return candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) ?? "/usr/bin/env"
     }
 
     init() {
@@ -117,8 +123,15 @@ final class ResumeScheduler: ObservableObject {
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: codexExecutable)
-        let workingDirectoryArguments = originalWorkingDirectory(for: session.id).map { ["-C", $0.path] } ?? []
-        let command = ["exec", "resume", session.id, "continue"]
+        let workspace = originalWorkingDirectory(for: session.id)
+        let workingDirectoryArguments = workspace.map { ["-C", $0.path] } ?? []
+        if let workspace {
+            process.currentDirectoryURL = workspace
+        } else {
+            process.currentDirectoryURL = FileManager.default.homeDirectoryForCurrentUser
+        }
+        let needsGitCheckBypass = workspace.map { !isGitWorktree($0) } ?? true
+        let command = ["exec", "resume"] + (needsGitCheckBypass ? ["--skip-git-repo-check"] : []) + [session.id, "continue"]
         process.arguments = codexExecutable == "/usr/bin/env"
             ? ["codex"] + workingDirectoryArguments + command
             : workingDirectoryArguments + command
@@ -140,7 +153,8 @@ final class ResumeScheduler: ObservableObject {
             try process.run()
             runningProcesses[session.id] = process
             updateActivity(ResumeActivity(state: .running, scheduledAt: activity(for: session)?.scheduledAt, startedAt: startedAt), for: session.id)
-            notify(title: "Codex Resets Window", body: "Started the selected Codex session.", identifier: session.id)
+            let detail = workspace == nil ? " using a safe no-project fallback." : "."
+            notify(title: "Codex Resets Window", body: "Started the selected Codex session\(detail)", identifier: session.id)
         } catch {
             updateActivity(ResumeActivity(
                 state: .failed,
@@ -264,11 +278,21 @@ final class ResumeScheduler: ObservableObject {
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: identifier, content: content, trigger: nil))
     }
 
-    private enum SessionTaskState { case unknown, running, completed }
+    private enum SessionTaskState: Equatable { case unknown, running, completed }
+
+    private struct TranscriptObservation {
+        let modificationDate: Date
+        let state: SessionTaskState
+    }
 
     private func sessionTaskState(sessionID: String, after startedAt: Date) -> SessionTaskState {
         guard let transcript = transcriptURL(for: sessionID),
-              let contents = try? String(contentsOf: transcript, encoding: .utf8) else { return .unknown }
+              let attributes = try? FileManager.default.attributesOfItem(atPath: transcript.path),
+              let modificationDate = attributes[.modificationDate] as? Date else { return .unknown }
+        if let observation = transcriptObservations[sessionID], observation.modificationDate == modificationDate {
+            return observation.state
+        }
+        guard let contents = try? String(contentsOf: transcript, encoding: .utf8) else { return .unknown }
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         var activeTurnID: String?
@@ -281,21 +305,42 @@ final class ResumeScheduler: ObservableObject {
                   let payload = object["payload"] as? [String: Any],
                   let type = payload["type"] as? String else { continue }
             if type == "task_started" { activeTurnID = payload["turn_id"] as? String }
-            if type == "task_complete", activeTurnID == payload["turn_id"] as? String { return .completed }
+            if type == "task_complete", activeTurnID == payload["turn_id"] as? String {
+                transcriptObservations[sessionID] = TranscriptObservation(modificationDate: modificationDate, state: .completed)
+                return .completed
+            }
         }
-        return activeTurnID == nil ? .unknown : .running
+        let state: SessionTaskState = activeTurnID == nil ? .unknown : .running
+        transcriptObservations[sessionID] = TranscriptObservation(modificationDate: modificationDate, state: state)
+        return state
     }
 
     private func originalWorkingDirectory(for sessionID: String) -> URL? {
         guard let transcript = transcriptURL(for: sessionID),
-              let handle = try? FileHandle(forReadingFrom: transcript),
-              let firstLine = try? handle.read(upToCount: 16_384),
+              let firstLine = firstLineData(in: transcript),
               let object = try? JSONSerialization.jsonObject(with: firstLine) as? [String: Any],
               let payload = object["payload"] as? [String: Any],
               let path = payload["cwd"] as? String,
               FileManager.default.fileExists(atPath: path) else { return nil }
-        defer { try? handle.close() }
         return URL(fileURLWithPath: path, isDirectory: true)
+    }
+
+    private func firstLineData(in fileURL: URL) -> Data? {
+        guard let handle = try? FileHandle(forReadingFrom: fileURL) else { return nil }
+        defer { try? handle.close() }
+        var line = Data()
+        while line.count < 1_048_576, let chunk = try? handle.read(upToCount: 65_536), !chunk.isEmpty {
+            if let newline = chunk.firstIndex(of: 0x0A) {
+                line.append(chunk.prefix(upTo: newline))
+                return line
+            }
+            line.append(chunk)
+        }
+        return nil
+    }
+
+    private func isGitWorktree(_ directory: URL) -> Bool {
+        FileManager.default.fileExists(atPath: directory.appendingPathComponent(".git").path)
     }
 
     private func transcriptURL(for sessionID: String) -> URL? {

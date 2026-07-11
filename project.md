@@ -16,6 +16,7 @@ Codex Resets Window is a native macOS menu-bar companion for Codex usage. It pre
 - The installed app is managed by the user-level `com.codexresets.window` LaunchAgent. It starts at login and restarts only after abnormal exit; the app's explicit Quit action exits successfully and is not restarted.
 - Refreshes are serialized, so launch, popover-open, and manual refresh cannot overlap usage or session-index reads.
 - A persisted queued continuation schedules from its stored target time after the local session index loads, even if a transient usage-network refresh fails.
+- Session metadata is read as a complete first JSONL record (up to 1 MiB), rather than a fixed prefix, because Desktop-originated session metadata can exceed 16 KiB. This restores the recorded `cwd` reliably. When the directory is valid, the CLI runs with `-C <cwd>`; when it is unavailable or is no longer a Git worktree, the app uses the CLI's explicit `--skip-git-repo-check` fallback from the user home directory instead of failing a trusted-directory preflight.
 - The top-bar countdown uses a lightweight SwiftUI `TimelineView`; it does not poll the network. Network refresh happens when the popover appears or the refresh button is clicked.
 - `Resources/AppIcon.svg` is the editable source for the bundled `.icns` app icon.
 - Usage cards use brighter pastel accents, while session switches remain compact; enabling a switch shows the scheduled `Start at HH:MM` line beneath it.
