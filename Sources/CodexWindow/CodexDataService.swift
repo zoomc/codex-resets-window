@@ -7,9 +7,9 @@ enum CodexDataError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .missingLogin: "未找到本机 Codex 登录状态"
-        case .invalidLogin: "本机 Codex 登录状态无效，请重新登录"
-        case .invalidResponse: "无法读取 Codex 用量数据"
+        case .missingLogin: "Codex login state was not found on this Mac."
+        case .invalidLogin: "Codex login state is invalid. Please sign in again."
+        case .invalidResponse: "Codex usage data could not be loaded."
         }
     }
 }

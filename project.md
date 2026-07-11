@@ -1,13 +1,15 @@
 # Codex Window
 
-Codex Window is a native macOS menu-bar companion for Codex usage. It presents the current 5-hour and weekly usage windows, lists locally indexed Codex conversations, and can schedule a selected conversation to reopen five minutes after the 5-hour window resets.
+Codex Window is a native macOS menu-bar companion for Codex usage. It presents the current 5-hour and weekly usage windows, lists locally indexed Codex conversations, opens a selected session when its title is clicked, and can send the English `continue` prompt five minutes after the 5-hour window resets.
 
 ## Privacy model
 
 - Reads `~/.codex/auth.json` only to make an authenticated, read-only usage request to ChatGPT.
-- Reads `~/.codex/session_index.jsonl` locally for conversation IDs, titles, and update times.
+- Reads `~/.codex/session_index.jsonl` locally for conversation IDs, dynamic titles, and update times.
 - Does not upload, store, display, or commit access tokens, account IDs, email addresses, conversation content, or raw API responses.
-- Scheduled resume launches the local `codex resume <session-id>` command. It does not send a new prompt or transmit conversation content.
+- Clicking a title opens `codex resume <session-id>` in Terminal.
+- Scheduled resume invokes `codex exec resume <session-id> "continue"` so the selected session receives a new English continuation prompt.
+- The top-bar countdown uses a lightweight SwiftUI `TimelineView`; it does not poll the network. Network refresh happens when the popover appears or the refresh button is clicked.
 
 ## Development
 

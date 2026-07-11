@@ -6,3 +6,7 @@
 - Read-only 5-hour and weekly Codex usage display.
 - Local Codex conversation index and per-conversation resume scheduling.
 - Privacy-first documentation and Git hygiene.
+- English-first popover UI with muted usage cards and compact session rows.
+- ChatGPT-style hexagonal mark combined with a live countdown ring.
+- Refresh-on-open behavior, title-to-session launching, and per-session continuation scheduling.
+- Scheduled `codex exec resume <session-id> "continue"` execution five minutes after reset.

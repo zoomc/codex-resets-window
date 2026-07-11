@@ -29,7 +29,19 @@ struct UsageWindow: Codable, Equatable, Sendable {
     }
 
     var remainingPercent: Int { max(0, min(100, 100 - usedPercent)) }
-    var resetText: String { resetAt.formatted(date: .omitted, time: .shortened) }
+    var resetText: String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        return formatter.string(from: resetAt)
+    }
+    var countdownText: String {
+        let seconds = max(0, Int(resetAt.timeIntervalSinceNow))
+        let hours = seconds / 3600
+        let minutes = (seconds % 3600) / 60
+        return hours > 0 ? "\(hours)h \(minutes)m" : "\(minutes)m"
+    }
 }
 
 struct UsageSnapshot: Decodable, Equatable, Sendable {
@@ -81,4 +93,12 @@ struct CodexSession: Identifiable, Codable, Hashable, Sendable {
     }
 
     var displayName: String { threadName.isEmpty ? "未命名对话" : threadName }
+
+    var updatedText: String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: updatedAt)
+    }
 }

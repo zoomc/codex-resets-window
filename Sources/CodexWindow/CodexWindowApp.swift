@@ -7,20 +7,35 @@ struct CodexWindowApp: App {
     var body: some Scene {
         MenuBarExtra {
             MenuContent(model: model)
-                .task { await model.refresh() }
+                .onAppear { Task { await model.refresh() } }
         } label: {
-            HStack(spacing: 4) {
-                CodexTimerMark(progress: model.usage.map { Double($0.primary.remainingPercent) / 100 } ?? 0)
-                Text(model.menuTitle)
-            }
+            TopBarLabel(primary: model.usage?.primary)
         }
         .menuBarExtraStyle(.window)
 
         Window("Codex Window", id: "dashboard") {
             DashboardView(model: model)
-                .task { await model.refresh() }
+                .onAppear { Task { await model.refresh() } }
         }
         .defaultSize(width: 680, height: 720)
+    }
+}
+
+struct TopBarLabel: View {
+    let primary: UsageWindow?
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 30)) { _ in
+            HStack(spacing: 4) {
+                CodexTimerMark(progress: Double(primary?.remainingPercent ?? 0) / 100)
+                if let primary {
+                    Text("\(primary.remainingPercent)% · \(primary.countdownText)")
+                        .monospacedDigit()
+                } else {
+                    Text("Codex")
+                }
+            }
+        }
     }
 }
 
@@ -35,7 +50,7 @@ struct CodexTimerMark: View {
                 .trim(from: 0, to: max(0.02, min(1, progress)))
                 .stroke(.tint, style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
                 .rotationEffect(.degrees(-90))
-            Image(systemName: "sparkles")
+            Image(systemName: "circle.hexagonpath")
                 .font(.system(size: 10, weight: .bold))
             Image(systemName: "timer")
                 .font(.system(size: 7, weight: .bold))
@@ -44,7 +59,7 @@ struct CodexTimerMark: View {
                 .offset(x: 2, y: 2)
         }
         .frame(width: 18, height: 18)
-        .accessibilityLabel("Codex 额度计时器")
+        .accessibilityLabel("ChatGPT usage timer")
     }
 }
 
@@ -60,20 +75,20 @@ final class DashboardModel: ObservableObject {
         Task { await refresh() }
     }
 
-    var menuTitle: String {
-        guard let primary = usage?.primary else { return "Codex" }
-        return "\(primary.remainingPercent)% · \(primary.resetText)"
-    }
-
     func refresh() async {
         sessions = await service.loadSessions()
+        scheduler.updateSessions(sessions)
         do {
             usage = try await service.fetchUsage()
             errorMessage = nil
-            scheduler.schedule(resetAt: usage?.primary.resetAt, sessions: sessions)
+            scheduler.schedule(resetAt: usage?.primary.resetAt)
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    func open(_ session: CodexSession) {
+        scheduler.open(session)
     }
 }
 
@@ -81,28 +96,45 @@ struct MenuContent: View {
     @ObservedObject var model: DashboardModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Codex Window").font(.headline.weight(.semibold))
+                Spacer()
+                Button { Task { await model.refresh() } } label: {
+                    Image(systemName: "arrow.clockwise.circle.fill")
+                        .font(.title3)
+                }
+                .buttonStyle(.plain)
+                .help("Refresh usage and sessions")
+                .accessibilityLabel("Refresh usage and sessions")
+            }
+
             if let usage = model.usage {
-                HStack(spacing: 10) {
-                    UsageMiniCard(title: "5 小时", window: usage.primary, accent: .green)
-                    UsageMiniCard(title: "每周", window: usage.secondary, accent: .purple)
+                HStack(spacing: 8) {
+                    UsageMiniCard(title: "5 hours", window: usage.primary, accent: Color(red: 0.36, green: 0.58, blue: 0.50))
+                    UsageMiniCard(title: "Weekly", window: usage.secondary, accent: Color(red: 0.50, green: 0.47, blue: 0.64))
                 }
             } else {
-                Text(model.errorMessage ?? "正在读取用量…")
+                Text(model.errorMessage ?? "Loading usage…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
+
             Divider()
             HStack {
-                Text("本地 Codex 对话").font(.headline)
+                Text("Local Codex sessions").font(.headline)
                 Spacer()
                 Text("\(model.sessions.count)").font(.caption).foregroundStyle(.secondary)
             }
+
             if model.sessions.isEmpty {
-                Text("尚未找到本地会话索引")
+                Text("No local sessions found")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 100, alignment: .center)
             } else {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 8) {
+                    LazyVStack(alignment: .leading, spacing: 6) {
                         ForEach(model.sessions) { session in
                             SessionRow(session: session, model: model)
                         }
@@ -110,12 +142,11 @@ struct MenuContent: View {
                 }
                 .frame(minHeight: 140, maxHeight: 390)
             }
+
             Divider()
-            Button("打开 Codex Window") { NSApp.activate(ignoringOtherApps: true) }
-            Button("刷新") { Task { await model.refresh() } }
-            Button("退出") { NSApp.terminate(nil) }
+            Button("Quit") { NSApp.terminate(nil) }
         }
-        .padding()
+        .padding(12)
         .frame(width: 520)
     }
 }
@@ -126,7 +157,7 @@ struct UsageMiniCard: View {
     let accent: Color
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
                 Text(title)
                     .font(.headline.weight(.bold))
@@ -136,24 +167,24 @@ struct UsageMiniCard: View {
                     .font(.title3.weight(.bold))
                     .monospacedDigit()
             }
-            Text("剩余额度")
+            Text("Remaining")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             ProgressView(value: Double(window.remainingPercent), total: 100)
                 .tint(accent)
             HStack(spacing: 4) {
                 Image(systemName: "arrow.counterclockwise")
-                Text(window.resetText)
+                Text("Resets \(window.resetText)")
             }
             .font(.caption2.weight(.medium))
             .foregroundStyle(.secondary)
         }
-        .padding(12)
+        .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(accent.opacity(0.25), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(accent.opacity(0.22), lineWidth: 1)
         }
     }
 }
@@ -163,41 +194,45 @@ struct DashboardView: View {
 
     var body: some View {
         ZStack {
-            LinearGradient(colors: [.cyan.opacity(0.24), .indigo.opacity(0.18), .mint.opacity(0.20)], startPoint: .topLeading, endPoint: .bottomTrailing)
+            LinearGradient(colors: [.cyan.opacity(0.20), .indigo.opacity(0.14), .mint.opacity(0.16)], startPoint: .topLeading, endPoint: .bottomTrailing)
                 .ignoresSafeArea()
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 18) {
                     HStack {
                         VStack(alignment: .leading) {
                             Text("Codex Window").font(.largeTitle.bold())
-                            Text("本地、私密的用量与会话助手").foregroundStyle(.secondary)
+                            Text("Private local usage and session companion.").foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Button { Task { await model.refresh() } } label: { Image(systemName: "arrow.clockwise") }
-                            .buttonStyle(.bordered)
+                        Button { Task { await model.refresh() } } label: {
+                            Image(systemName: "arrow.clockwise.circle.fill")
+                                .font(.title2)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Refresh usage and sessions")
                     }
 
                     if let usage = model.usage {
-                        HStack(spacing: 16) {
-                            UsageCard(title: "5 小时使用限额", window: usage.primary, emphasis: true)
-                            UsageCard(title: "每周使用限额", window: usage.secondary, emphasis: false)
+                        HStack(spacing: 14) {
+                            UsageCard(title: "5-hour window", window: usage.primary, emphasis: true)
+                            UsageCard(title: "Weekly window", window: usage.secondary, emphasis: false)
                         }
-                        Text("已开启的会话会在 5 小时窗口重置后的 5 分钟，于本机尝试恢复。不会发送新的提示词。")
+                        Text("Enabled sessions receive the English prompt \"continue\" five minutes after the 5-hour window resets.")
                             .font(.footnote).foregroundStyle(.secondary)
                     } else if let error = model.errorMessage {
-                        ContentUnavailableView("无法读取用量", systemImage: "exclamationmark.triangle", description: Text(error))
+                        ContentUnavailableView("Usage unavailable", systemImage: "exclamationmark.triangle", description: Text(error))
                     } else {
-                        ProgressView("正在读取 Codex 用量")
+                        ProgressView("Loading Codex usage")
                     }
 
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("本地 Codex 对话").font(.title2.bold())
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Local Codex sessions").font(.title2.bold())
                         ForEach(model.sessions) { session in
                             SessionRow(session: session, model: model)
                         }
                     }
                 }
-                .padding(28)
+                .padding(24)
             }
         }
     }
@@ -209,18 +244,18 @@ struct UsageCard: View {
     let emphasis: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             Text(title).foregroundStyle(.secondary)
-            Text("\(window.remainingPercent)% 剩余").font(.title.bold())
+            Text("\(window.remainingPercent)% remaining").font(.title.bold())
             ProgressView(value: Double(window.remainingPercent), total: 100)
-                .tint(emphasis ? .green : .mint)
-            Text("重置时间：\(window.resetAt.formatted(date: .abbreviated, time: .shortened))")
+                .tint(emphasis ? Color(red: 0.36, green: 0.58, blue: 0.50) : Color(red: 0.50, green: 0.47, blue: 0.64))
+            Text("Resets \(window.resetText)")
                 .font(.footnote).foregroundStyle(.secondary)
         }
-        .padding(20)
+        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).stroke(.white.opacity(0.38)))
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(.white.opacity(0.30)))
     }
 }
 
@@ -229,22 +264,46 @@ struct SessionRow: View {
     @ObservedObject var model: DashboardModel
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "bubble.left.and.bubble.right").foregroundStyle(.cyan)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(session.displayName).lineLimit(1)
-                Text(session.updatedAt.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary)
+        HStack(spacing: 8) {
+            Button { model.open(session) } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "bubble.left.and.bubble.right")
+                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(session.displayName).lineLimit(1)
+                        Text(session.updatedText)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
-            Spacer()
-            Toggle("恢复后继续", isOn: Binding(
-                get: { model.scheduler.isEnabled(session) },
-                set: { model.scheduler.setEnabled($0, for: session, resetAt: model.usage?.primary.resetAt) }
-            ))
-            .toggleStyle(.switch)
-            .labelsHidden()
-            .accessibilityLabel("在恢复后继续 \(session.displayName)")
+            .buttonStyle(.plain)
+            Spacer(minLength: 4)
+            VStack(alignment: .trailing, spacing: 2) {
+                Toggle("Continue after reset", isOn: Binding(
+                    get: { model.scheduler.isEnabled(session) },
+                    set: { model.scheduler.setEnabled($0, for: session, resetAt: model.usage?.primary.resetAt) }
+                ))
+                .toggleStyle(.switch)
+                .labelsHidden()
+                .accessibilityLabel("Continue \(session.displayName) after reset")
+                if model.scheduler.isEnabled(session), let continuation = model.scheduler.continuationDate(resetAt: model.usage?.primary.resetAt) {
+                    Text("Task continues \(englishTime(continuation))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
-        .padding(14)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .padding(.horizontal, 9)
+        .padding(.vertical, 6)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
     }
+}
+
+private func englishTime(_ date: Date) -> String {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.dateStyle = .none
+    formatter.timeStyle = .short
+    return formatter.string(from: date)
 }
