@@ -59,5 +59,20 @@ struct CodexSession: Identifiable, Codable, Hashable, Sendable {
 
     enum CodingKeys: String, CodingKey { case id, threadName = "thread_name", updatedAt = "updated_at" }
 
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        threadName = try container.decode(String.self, forKey: .threadName)
+        let timestamp = try container.decode(String.self, forKey: .updatedAt)
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime]
+        guard let parsed = fractional.date(from: timestamp) ?? plain.date(from: timestamp) else {
+            throw DecodingError.dataCorruptedError(forKey: .updatedAt, in: container, debugDescription: "Unsupported ISO8601 timestamp")
+        }
+        updatedAt = parsed
+    }
+
     var displayName: String { threadName.isEmpty ? "未命名对话" : threadName }
 }
