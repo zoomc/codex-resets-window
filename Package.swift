@@ -2,10 +2,10 @@
 import PackageDescription
 
 let package = Package(
-    name: "CodexWindow",
+    name: "CodexResetsWindow",
     platforms: [.macOS(.v15)],
-    products: [.executable(name: "CodexWindow", targets: ["CodexWindow"])],
+    products: [.executable(name: "CodexResetsWindow", targets: ["CodexResetsWindow"])],
     targets: [
-        .executableTarget(name: "CodexWindow")
+        .executableTarget(name: "CodexResetsWindow")
     ]
 )

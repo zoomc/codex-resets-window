@@ -3,12 +3,12 @@ import Combine
 import SwiftUI
 
 @main
-struct CodexWindowApp: App {
+struct CodexResetsWindowApp: App {
     @NSApplicationDelegateAdaptor(StatusBarDelegate.self) private var statusBar
     @StateObject private var model = DashboardModel.shared
 
     var body: some Scene {
-        Window("Codex Window", id: "dashboard") {
+        Window("Codex Resets Window", id: "dashboard") {
             DashboardView(model: model)
                 .onAppear { Task { await model.refresh() } }
         }
@@ -32,7 +32,7 @@ final class StatusBarDelegate: NSObject, NSApplicationDelegate {
         button.action = #selector(togglePopover)
         button.imagePosition = .imageLeading
         button.imageScaling = .scaleProportionallyDown
-        button.toolTip = "Codex Window"
+        button.toolTip = "Codex Resets Window"
 
         popover.behavior = .transient
         popover.animates = true
@@ -147,7 +147,7 @@ struct MenuContent: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Codex Window").font(.headline.weight(.semibold))
+                Text("Codex Resets Window").font(.headline.weight(.semibold))
                 Spacer()
                 Button { Task { await model.refresh() } } label: {
                     Image(systemName: "arrow.clockwise.circle.fill")
@@ -250,7 +250,7 @@ struct DashboardView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     HStack {
                         VStack(alignment: .leading) {
-                            Text("Codex Window").font(.largeTitle.bold())
+                            Text("Codex Resets Window").font(.largeTitle.bold())
                             Text("Private local usage and session companion.").foregroundStyle(.secondary)
                         }
                         Spacer()

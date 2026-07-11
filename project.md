@@ -1,6 +1,6 @@
-# Codex Window
+# Codex Resets Window
 
-Codex Window is a native macOS menu-bar companion for Codex usage. It presents the current 5-hour and weekly usage windows, lists locally indexed Codex conversations, opens a selected session when its title is clicked, and can send the English `continue` prompt five minutes after the 5-hour window resets.
+Codex Resets Window is a native macOS menu-bar companion for Codex usage. It presents the current 5-hour and weekly usage windows, lists locally indexed Codex conversations, opens a selected session when its title is clicked, and can send the English `continue` prompt five minutes after the 5-hour window resets.
 
 ## Privacy model
 
@@ -17,9 +17,9 @@ Codex Window is a native macOS menu-bar companion for Codex usage. It presents t
 
 ```sh
 swift build
-swift run CodexWindow
+swift run CodexResetsWindow
 ```
 
-`Tests/CodexWindowTests` contains a small regression test for Xcode-based development. The installed Command Line Tools toolchain does not ship XCTest, so it is intentionally not included in the standalone SwiftPM target.
+`Tests/CodexResetsWindowTests` contains a small regression test for Xcode-based development. The installed Command Line Tools toolchain does not ship XCTest, so it is intentionally not included in the standalone SwiftPM target.
 
 The app requires a current Codex Desktop/CLI login for usage values. If the local Codex CLI is unavailable, scheduled sessions remain queued and the app shows a local notification instead.

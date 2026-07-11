@@ -68,7 +68,7 @@ final class ResumeScheduler: ObservableObject {
         try? process.run()
 
         let content = UNMutableNotificationContent()
-        content.title = "Codex Window"
+        content.title = "Codex Resets Window"
         content.body = "Sent continue to the selected Codex session."
         content.sound = .default
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: session.id, content: content, trigger: nil))

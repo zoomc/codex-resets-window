@@ -1,5 +1,5 @@
 import XCTest
-@testable import CodexWindow
+@testable import CodexResetsWindow
 
 final class CodexWindowTests: XCTestCase {
     func testRemainingPercentageIsClamped() {
