@@ -10,6 +10,7 @@ Codex Window is a native macOS menu-bar companion for Codex usage. It presents t
 - Clicking a title opens `<ChatGPT.app>/Contents/Resources/codex resume <session-id>` in Terminal (falling back to `codex` on PATH).
 - Scheduled resume invokes the same executable with `exec resume <session-id> "continue"` so the selected session receives a new English continuation prompt.
 - The top-bar countdown uses a lightweight SwiftUI `TimelineView`; it does not poll the network. Network refresh happens when the popover appears or the refresh button is clicked.
+- `Resources/AppIcon.svg` is the editable source for the bundled `.icns` app icon.
 
 ## Development
 

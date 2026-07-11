@@ -11,3 +11,4 @@
 - Refresh-on-open behavior, title-to-session launching, and per-session continuation scheduling.
 - Scheduled `codex exec resume <session-id> "continue"` execution five minutes after reset.
 - Prefer the working Codex CLI bundled inside ChatGPT.app when the PATH shim is unavailable.
+- Added a dark liquid-glass app icon with a ChatGPT-inspired interlocking mark and timer hand.
