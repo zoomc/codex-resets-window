@@ -1,23 +1,71 @@
+import AppKit
+import Combine
 import SwiftUI
 
 @main
 struct CodexWindowApp: App {
-    @StateObject private var model = DashboardModel()
+    @NSApplicationDelegateAdaptor(StatusBarDelegate.self) private var statusBar
+    @StateObject private var model = DashboardModel.shared
 
     var body: some Scene {
-        MenuBarExtra {
-            MenuContent(model: model)
-                .onAppear { Task { await model.refresh() } }
-        } label: {
-            TopBarLabel(primary: model.usage?.primary)
-        }
-        .menuBarExtraStyle(.window)
-
         Window("Codex Window", id: "dashboard") {
             DashboardView(model: model)
                 .onAppear { Task { await model.refresh() } }
         }
         .defaultSize(width: 680, height: 720)
+    }
+}
+
+@MainActor
+final class StatusBarDelegate: NSObject, NSApplicationDelegate {
+    private let model = DashboardModel.shared
+    private var statusItem: NSStatusItem!
+    private var popover = NSPopover()
+    private var ticker: Timer?
+    private var observation: AnyCancellable?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        guard let button = statusItem.button else { return }
+        button.target = self
+        button.action = #selector(togglePopover)
+        button.imagePosition = .imageLeading
+        button.imageScaling = .scaleProportionallyDown
+        button.toolTip = "Codex Window"
+
+        popover.behavior = .transient
+        popover.animates = true
+        popover.contentSize = NSSize(width: 520, height: 620)
+        popover.contentViewController = NSHostingController(rootView: MenuContent(model: model))
+
+        observation = model.objectWillChange.sink { [weak self] _ in
+            Task { @MainActor in self?.updateStatusItem() }
+        }
+        ticker = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.updateStatusItem() }
+        }
+        updateStatusItem()
+    }
+
+    private func updateStatusItem() {
+        guard let button = statusItem?.button else { return }
+        button.image = NSImage(systemSymbolName: "circle.hexagonpath", accessibilityDescription: "ChatGPT usage timer")
+        if let primary = model.usage?.primary {
+            button.title = "\(primary.remainingPercent)% · \(primary.countdownText)"
+        } else {
+            button.title = "Codex"
+        }
+    }
+
+    @objc private func togglePopover() {
+        guard let button = statusItem.button else { return }
+        if popover.isShown {
+            popover.performClose(nil)
+        } else {
+            Task { await model.refresh() }
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        }
     }
 }
 
@@ -65,6 +113,7 @@ struct CodexTimerMark: View {
 
 @MainActor
 final class DashboardModel: ObservableObject {
+    static let shared = DashboardModel()
     @Published var usage: UsageSnapshot?
     @Published var sessions: [CodexSession] = []
     @Published var errorMessage: String?
