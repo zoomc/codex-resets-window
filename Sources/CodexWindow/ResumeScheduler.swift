@@ -9,6 +9,11 @@ final class ResumeScheduler: ObservableObject {
     private var knownSessions: [CodexSession] = []
     private let defaultsKey = "scheduledSessionIDs"
 
+    private var codexExecutable: String {
+        let bundled = "/Applications/ChatGPT.app/Contents/Resources/codex"
+        return FileManager.default.isExecutableFile(atPath: bundled) ? bundled : "/usr/bin/env"
+    }
+
     init() {
         enabledIDs = Set(UserDefaults.standard.stringArray(forKey: defaultsKey) ?? [])
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
@@ -45,8 +50,9 @@ final class ResumeScheduler: ObservableObject {
     }
 
     func open(_ session: CodexSession) {
+        let commandPath = codexExecutable.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
         let escapedID = session.id.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
-        let script = "tell application \"Terminal\" to do script \"codex resume \(escapedID)\""
+        let script = "tell application \"Terminal\" to do script \"\(commandPath) resume \(escapedID)\""
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
         process.arguments = ["-e", script]
@@ -55,8 +61,10 @@ final class ResumeScheduler: ObservableObject {
 
     private func resume(_ session: CodexSession) {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["codex", "exec", "resume", session.id, "continue"]
+        process.executableURL = URL(fileURLWithPath: codexExecutable)
+        process.arguments = codexExecutable == "/usr/bin/env"
+            ? ["codex", "exec", "resume", session.id, "continue"]
+            : ["exec", "resume", session.id, "continue"]
         try? process.run()
 
         let content = UNMutableNotificationContent()

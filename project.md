@@ -7,8 +7,8 @@ Codex Window is a native macOS menu-bar companion for Codex usage. It presents t
 - Reads `~/.codex/auth.json` only to make an authenticated, read-only usage request to ChatGPT.
 - Reads `~/.codex/session_index.jsonl` locally for conversation IDs, dynamic titles, and update times.
 - Does not upload, store, display, or commit access tokens, account IDs, email addresses, conversation content, or raw API responses.
-- Clicking a title opens `codex resume <session-id>` in Terminal.
-- Scheduled resume invokes `codex exec resume <session-id> "continue"` so the selected session receives a new English continuation prompt.
+- Clicking a title opens `<ChatGPT.app>/Contents/Resources/codex resume <session-id>` in Terminal (falling back to `codex` on PATH).
+- Scheduled resume invokes the same executable with `exec resume <session-id> "continue"` so the selected session receives a new English continuation prompt.
 - The top-bar countdown uses a lightweight SwiftUI `TimelineView`; it does not poll the network. Network refresh happens when the popover appears or the refresh button is clicked.
 
 ## Development

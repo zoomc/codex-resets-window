@@ -10,3 +10,4 @@
 - ChatGPT-style hexagonal mark combined with a live countdown ring.
 - Refresh-on-open behavior, title-to-session launching, and per-session continuation scheduling.
 - Scheduled `codex exec resume <session-id> "continue"` execution five minutes after reset.
+- Prefer the working Codex CLI bundled inside ChatGPT.app when the PATH shim is unavailable.
