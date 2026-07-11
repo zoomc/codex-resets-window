@@ -1,8 +1,14 @@
 # Codex Resets Window
 
-> A calm, native macOS status-bar companion for Codex usage windows and local session recovery.
+> A native macOS status-bar companion that automatically continues selected Codex sessions after the usage reset.
 
 ![Codex Resets Window preview](Assets/README-preview.png)
+
+## The headline feature: automatic continuation
+
+Turn on the switch beside any local Codex session and Codex Resets Window takes care of the waiting. Five minutes after the 5-hour window resets, it resumes that exact session and sends the English `continue` prompt in its existing context. You see the planned `Start at HH:MM` time directly under the switch, so the next run is always explicit.
+
+This removes the need to watch the clock, remember which task was paused, or manually reopen a session when capacity returns.
 
 ## Why it exists
 
@@ -21,14 +27,16 @@ Codex Resets Window puts the useful state in one small, always-available popover
 - Refreshes usage and the local session list when the popover opens.
 - Displays local Codex session titles from `~/.codex/session_index.jsonl`.
 - Opens a session when its title area is clicked.
-- Lets you enable continuation per session with a compact switch.
+- Lets you enable automatic continuation per session with a compact switch.
 - Shows `Start at HH:MM` only while a session switch is enabled.
-- Five minutes after the 5-hour reset, sends the English `continue` prompt with `codex exec resume`.
+- Five minutes after the 5-hour reset, runs `codex exec resume <session-id> "continue"` in the original session context.
 - Uses a lightweight local countdown without network polling.
 
 ## Privacy by design
 
 The app reads local Codex metadata and uses the existing login state only for the read-only usage request. It does not commit or upload access tokens, account identifiers, email addresses, or conversation bodies. Session titles stay local and are never copied into project files.
+
+The public repository contains only source code, documentation, artwork, and a generic UI preview. It contains no local session export, credentials, account identifiers, email addresses, or private conversation text.
 
 ## Build and run
 
