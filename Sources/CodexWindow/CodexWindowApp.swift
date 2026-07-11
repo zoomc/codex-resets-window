@@ -29,6 +29,10 @@ final class DashboardModel: ObservableObject {
     let service = CodexDataService()
     let scheduler = ResumeScheduler()
 
+    init() {
+        Task { await refresh() }
+    }
+
     var menuTitle: String {
         guard let primary = usage?.primary else { return "Codex" }
         return "\(primary.remainingPercent)% · \(primary.resetText)"
