@@ -161,8 +161,8 @@ struct MenuContent: View {
 
             if let usage = model.usage {
                 HStack(spacing: 8) {
-                    UsageMiniCard(title: "5 hours", window: usage.primary, accent: Color(red: 0.38, green: 0.74, blue: 0.61))
-                    UsageMiniCard(title: "Weekly", window: usage.secondary, accent: Color(red: 0.66, green: 0.58, blue: 0.88))
+                    UsageMiniCard(title: "5 hours", window: usage.primary, accent: Color(red: 0.96, green: 0.55, blue: 0.46), showsDate: false)
+                    UsageMiniCard(title: "Weekly", window: usage.secondary, accent: Color(red: 0.30, green: 0.72, blue: 0.70), showsDate: true)
                 }
             } else {
                 Text(model.errorMessage ?? "Loading usage…")
@@ -205,6 +205,7 @@ struct UsageMiniCard: View {
     let title: String
     let window: UsageWindow
     let accent: Color
+    let showsDate: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -217,25 +218,41 @@ struct UsageMiniCard: View {
                     .font(.title3.weight(.bold))
                     .monospacedDigit()
             }
-            Text("Remaining")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            ProgressView(value: Double(window.remainingPercent), total: 100)
-                .tint(accent)
+            PastelProgressBar(value: window.remainingPercent, accent: accent)
             HStack(spacing: 4) {
                 Image(systemName: "arrow.counterclockwise")
-                Text("Resets \(window.resetText)")
+                Text("Resets \(showsDate ? window.resetDateText : window.resetText)")
             }
-            .font(.caption2.weight(.medium))
+            .font(.subheadline.weight(.medium))
             .foregroundStyle(.secondary)
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(
+            LinearGradient(colors: [accent.opacity(0.24), accent.opacity(0.08)], startPoint: .topLeading, endPoint: .bottomTrailing),
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
         .overlay {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(accent.opacity(0.22), lineWidth: 1)
         }
+    }
+}
+
+struct PastelProgressBar: View {
+    let value: Int
+    let accent: Color
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                Capsule().fill(accent.opacity(0.16))
+                Capsule().fill(accent)
+                    .frame(width: geometry.size.width * CGFloat(max(0, min(100, value))) / 100)
+            }
+        }
+        .frame(height: 6)
+        .accessibilityValue(Text("\(value) percent remaining"))
     }
 }
 
@@ -293,19 +310,25 @@ struct UsageCard: View {
     let window: UsageWindow
     let emphasis: Bool
 
+    private var accent: Color {
+        emphasis ? Color(red: 0.96, green: 0.55, blue: 0.46) : Color(red: 0.30, green: 0.72, blue: 0.70)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title).foregroundStyle(.secondary)
             Text("\(window.remainingPercent)% remaining").font(.title.bold())
-            ProgressView(value: Double(window.remainingPercent), total: 100)
-                .tint(emphasis ? Color(red: 0.38, green: 0.74, blue: 0.61) : Color(red: 0.66, green: 0.58, blue: 0.88))
-            Text("Resets \(window.resetText)")
-                .font(.footnote).foregroundStyle(.secondary)
+            PastelProgressBar(value: window.remainingPercent, accent: accent)
+            Text("Resets \(emphasis ? window.resetText : window.resetDateText)")
+                .font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(.white.opacity(0.30)))
+        .background(
+            LinearGradient(colors: [accent.opacity(0.22), accent.opacity(0.07)], startPoint: .topLeading, endPoint: .bottomTrailing),
+            in: RoundedRectangle(cornerRadius: 22, style: .continuous)
+        )
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(accent.opacity(0.28)))
     }
 }
 
@@ -319,12 +342,7 @@ struct SessionRow: View {
                 HStack(spacing: 8) {
                     Image(systemName: "bubble.left.and.bubble.right")
                         .foregroundStyle(.secondary)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(session.displayName).lineLimit(1)
-                        Text(session.updatedText)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    Text(session.displayName).lineLimit(1)
                 }
             }
             .buttonStyle(.plain)

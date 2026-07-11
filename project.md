@@ -12,6 +12,7 @@ Codex Resets Window is a native macOS menu-bar companion for Codex usage. It pre
 - The top-bar countdown uses a lightweight SwiftUI `TimelineView`; it does not poll the network. Network refresh happens when the popover appears or the refresh button is clicked.
 - `Resources/AppIcon.svg` is the editable source for the bundled `.icns` app icon.
 - Usage cards use brighter pastel accents, while session switches remain compact; enabling a switch shows the scheduled `Start at HH:MM` line beneath it.
+- The 5-hour card shows a clock time while the Weekly card shows a calendar date; progress bars use explicit pastel fills rather than the system gray style.
 
 ## Development
 

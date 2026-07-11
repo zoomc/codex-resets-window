@@ -36,6 +36,13 @@ struct UsageWindow: Codable, Equatable, Sendable {
         formatter.timeStyle = .short
         return formatter.string(from: resetAt)
     }
+    var resetDateText: String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter.string(from: resetAt)
+    }
     var countdownText: String {
         let seconds = max(0, Int(resetAt.timeIntervalSinceNow))
         let hours = seconds / 3600
