@@ -1,6 +1,6 @@
 import Foundation
 
-enum ResumeRunState: String, Sendable {
+enum ResumeRunState: String, Codable, Sendable {
     case queued
     case starting
     case running
@@ -18,7 +18,7 @@ enum ResumeRunState: String, Sendable {
     }
 }
 
-struct ResumeActivity: Equatable, Sendable {
+struct ResumeActivity: Codable, Equatable, Sendable {
     let state: ResumeRunState
     let scheduledAt: Date?
     let startedAt: Date?
@@ -41,6 +41,11 @@ struct ResumeActivity: Equatable, Sendable {
         self.lastOutput = lastOutput
         self.exitCode = exitCode
     }
+}
+
+struct PersistedContinuation: Codable, Sendable {
+    var createdAt: Date
+    var activity: ResumeActivity
 }
 
 struct UsageWindow: Codable, Equatable, Sendable {

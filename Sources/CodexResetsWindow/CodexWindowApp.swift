@@ -117,6 +117,7 @@ final class DashboardModel: ObservableObject {
     @Published var usage: UsageSnapshot?
     @Published var sessions: [CodexSession] = []
     @Published var errorMessage: String?
+    @Published private(set) var isRefreshing = false
     let service = CodexDataService()
     let scheduler = ResumeScheduler()
 
@@ -125,6 +126,9 @@ final class DashboardModel: ObservableObject {
     }
 
     func refresh() async {
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        defer { isRefreshing = false }
         sessions = await service.loadSessions()
         scheduler.updateSessions(sessions)
         do {
@@ -150,11 +154,12 @@ struct MenuContent: View {
                 Text("Codex Resets Window").font(.headline.weight(.semibold))
                 Spacer()
                 Button { Task { await model.refresh() } } label: {
-                    Image(systemName: "arrow.clockwise.circle.fill")
+                    Image(systemName: model.isRefreshing ? "arrow.triangle.2.circlepath.circle.fill" : "arrow.clockwise.circle.fill")
                         .font(.title2)
                 }
                 .buttonStyle(.plain)
                 .frame(width: 30, height: 30)
+                .disabled(model.isRefreshing)
                 .help("Refresh usage and sessions")
                 .accessibilityLabel("Refresh usage and sessions")
             }
@@ -194,6 +199,9 @@ struct MenuContent: View {
             }
 
             Divider()
+            Text("Each switch is a one-time continuation. It stays remembered for up to 7 hours, then clears automatically.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
             Button("Quit") { NSApp.terminate(nil) }
         }
         .padding(12)
