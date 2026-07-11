@@ -19,3 +19,4 @@
 - Hardened scheduled continuation: recover each session's original local working directory from its private session metadata and pass it with `-C` to `codex exec resume`, preventing an automatic `continue` from starting in the menu-bar app's unrelated directory.
 - Verified the CLI continuation flow against a real Codex Desktop-originated local task: the selected session received `continue` and resumed in its original repository without requiring Accessibility permission.
 - Added live local continuation observability: Queued/Starting/Running/Completed/Failed state, last-output preview, exit code, and completion notifications. Session titles now open their matching Codex Desktop task rather than spawning a Terminal window.
+- Made continuation switches one-shot to prevent duplicate prompts after an app refresh or restart, and added a user-level LaunchAgent for login launch plus abnormal-exit recovery.

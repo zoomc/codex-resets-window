@@ -60,6 +60,11 @@ final class ResumeScheduler: ObservableObject {
             Task { @MainActor in
                 guard let self else { return }
                 let targets = self.knownSessions.filter { self.enabledIDs.contains($0.id) }
+                // A switch represents one continuation after the next reset, not a
+                // recurring job. Remove it before spawning so a refresh or app
+                // restart cannot send duplicate `continue` prompts.
+                self.enabledIDs.subtract(targets.map(\.id))
+                UserDefaults.standard.set(Array(self.enabledIDs), forKey: self.defaultsKey)
                 targets.forEach { self.resume($0) }
             }
         }

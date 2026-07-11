@@ -357,7 +357,7 @@ struct SessionRow: View {
                 .controlSize(.small)
                 .labelsHidden()
                 .accessibilityLabel("Continue \(session.displayName) after reset")
-                if scheduler.isEnabled(session), let activity = scheduler.activity(for: session) {
+                if let activity = scheduler.activity(for: session) {
                     ResumeActivityView(activity: activity)
                 }
             }

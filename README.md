@@ -33,6 +33,8 @@ Codex Resets Window puts the useful state in one small, always-available popover
 - Tracks each launched continuation as `Queued`, `Starting`, `Running`, `Completed`, or `Failed`, with a local last-output preview and exit code when available.
 - Sends a local notification both when a continuation starts and when it finishes or fails.
 - Opens the matching Codex Desktop task through its `codex://threads/<session-id>` link when a title is clicked.
+- Treats each enabled switch as a one-time continuation, then turns it off before launching the CLI to prevent duplicate prompts after a refresh or restart.
+- Installs a per-user macOS LaunchAgent: starts at sign-in and restarts after an abnormal exit, while the explicit **Quit** button remains final.
 - Uses a lightweight local countdown without network polling.
 
 ## Privacy by design
