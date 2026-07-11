@@ -83,9 +83,10 @@ struct MenuContent: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             if let usage = model.usage {
-                Text("5 小时：\(usage.primary.remainingPercent)% 剩余 · \(usage.primary.resetText) 重置")
-                Text("每周：\(usage.secondary.remainingPercent)% 剩余 · \(usage.secondary.resetAt.formatted(date: .abbreviated, time: .shortened)) 重置")
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 10) {
+                    UsageMiniCard(title: "5 小时", window: usage.primary, accent: .green)
+                    UsageMiniCard(title: "每周", window: usage.secondary, accent: .purple)
+                }
             } else {
                 Text(model.errorMessage ?? "正在读取用量…")
             }
@@ -116,6 +117,44 @@ struct MenuContent: View {
         }
         .padding()
         .frame(width: 520)
+    }
+}
+
+struct UsageMiniCard: View {
+    let title: String
+    let window: UsageWindow
+    let accent: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(title)
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(accent)
+                Spacer(minLength: 4)
+                Text("\(window.remainingPercent)%")
+                    .font(.title3.weight(.bold))
+                    .monospacedDigit()
+            }
+            Text("剩余额度")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            ProgressView(value: Double(window.remainingPercent), total: 100)
+                .tint(accent)
+            HStack(spacing: 4) {
+                Image(systemName: "arrow.counterclockwise")
+                Text(window.resetText)
+            }
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(accent.opacity(0.25), lineWidth: 1)
+        }
     }
 }
 
