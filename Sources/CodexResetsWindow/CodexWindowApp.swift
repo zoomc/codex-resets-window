@@ -186,7 +186,7 @@ struct MenuContent: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 6) {
                         ForEach(model.sessions) { session in
-                            SessionRow(session: session, model: model)
+                            SessionRow(session: session, model: model, scheduler: model.scheduler)
                         }
                     }
                 }
@@ -295,7 +295,7 @@ struct DashboardView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Local Codex sessions").font(.title2.bold())
                         ForEach(model.sessions) { session in
-                            SessionRow(session: session, model: model)
+                            SessionRow(session: session, model: model, scheduler: model.scheduler)
                         }
                     }
                 }
@@ -335,6 +335,7 @@ struct UsageCard: View {
 struct SessionRow: View {
     let session: CodexSession
     @ObservedObject var model: DashboardModel
+    @ObservedObject var scheduler: ResumeScheduler
 
     var body: some View {
         HStack(spacing: 8) {
@@ -349,14 +350,14 @@ struct SessionRow: View {
             Spacer(minLength: 4)
             VStack(alignment: .trailing, spacing: 2) {
                 Toggle("Continue after reset", isOn: Binding(
-                    get: { model.scheduler.isEnabled(session) },
+                    get: { scheduler.isEnabled(session) },
                     set: { model.scheduler.setEnabled($0, for: session, resetAt: model.usage?.primary.resetAt) }
                 ))
                 .toggleStyle(.switch)
                 .controlSize(.small)
                 .labelsHidden()
                 .accessibilityLabel("Continue \(session.displayName) after reset")
-                if model.scheduler.isEnabled(session), let continuation = model.scheduler.continuationDate(resetAt: model.usage?.primary.resetAt) {
+                if scheduler.isEnabled(session), let continuation = scheduler.continuationDate(resetAt: model.usage?.primary.resetAt) {
                     Text("Start at \(englishTime(continuation))")
                         .font(.caption2)
                         .foregroundStyle(.secondary)

@@ -15,3 +15,4 @@
 - Refined usage colors, enlarged the popover refresh control, and tightened session-row switch layout.
 - Enabled rows now show `Start at HH:MM` beneath the switch.
 - Removed the redundant `Remaining` label, enlarged reset metadata, and changed Weekly reset metadata to a calendar date.
+- Fixed session-row observation so `Start at HH:MM` appears immediately when a switch is turned on.
