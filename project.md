@@ -21,6 +21,10 @@ Codex Resets Window is a native macOS menu-bar companion for Codex usage. It pre
 - `Resources/AppIcon.svg` is the editable source for the bundled `.icns` app icon.
 - Usage cards use brighter pastel accents, while session switches remain compact; enabling a switch shows the scheduled `Start at HH:MM` line beneath it.
 - The 5-hour card shows a clock time while the Weekly card shows a calendar date; progress bars use explicit pastel fills rather than the system gray style.
+- The app reports the official 5-hour and weekly **quota** windows plus a local burn-rate forecast.
+  Codex's current local transcript emits quota events rather than trustworthy per-turn
+  prompt/completion token counts, so the UI deliberately does not label its estimates as exact
+  tokens.
 
 ## Development
 
@@ -30,6 +34,10 @@ swift run CodexResetsWindow
 ```
 
 `Tests/CodexResetsWindowTests` contains a small regression test for Xcode-based development. The installed Command Line Tools toolchain does not ship XCTest, so it is intentionally not included in the standalone SwiftPM target.
+
+`Scripts/verify.sh` is the release gate: release build, deterministic in-process regression suite,
+then the shipped binary against an entirely synthetic Codex home and CLI. `Scripts/package.sh`
+creates an ad-hoc signed app bundle and can install it in `~/Applications`.
 
 The app requires a current Codex Desktop/CLI login for usage values. If the local Codex CLI is unavailable, scheduled sessions remain queued and the app shows a local notification instead.
 

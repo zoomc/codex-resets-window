@@ -24,6 +24,10 @@ Codex Resets Window puts the useful state in one small, always-available popover
 
 - Shows the 5-hour and weekly remaining percentages.
 - Shows a time for the 5-hour reset and a calendar date for the weekly reset.
+- Keeps a bounded local history of those official quota readings to show burn-rate and a
+  conservative "may run dry" forecast. This is quota telemetry, not invented per-message token
+  accounting: the local Codex transcript currently does not expose reliable prompt/completion
+  token totals.
 - Refreshes usage and the local session list when the popover opens.
 - Displays local Codex session titles from `~/.codex/session_index.jsonl`.
 - Opens a session when its title area is clicked.
@@ -51,6 +55,17 @@ The public repository contains only source code, documentation, artwork, and a g
 swift build -c release
 swift run CodexResetsWindow
 ```
+
+Before release, run the complete offline verification gate:
+
+```sh
+Scripts/verify.sh
+```
+
+Create a signed local app bundle with `Scripts/package.sh`; add `--install` to replace the local
+copy in `~/Applications`. The opt-in `Scripts/verify.sh --live` acceptance test creates two
+throwaway Codex sessions and consumes account capacity, so it is intentionally not part of the
+default gate.
 
 The installed app bundle is named **Codex Resets Window.app**. The app prefers the working Codex CLI bundled with ChatGPT.app and falls back to the `codex` command on `PATH`.
 
