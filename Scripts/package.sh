@@ -41,7 +41,10 @@ if [[ $INSTALL -eq 1 ]]; then
   ditto "$OUTPUT" "$STAGING/$APP_NAME"
   codesign --verify --deep --strict "$STAGING/$APP_NAME"
   cp Resources/com.codexresets.window.plist "$STAGING/$AGENT_LABEL.plist"
-  plutil -replace ProgramArguments.0 -string "$TARGET/Contents/MacOS/CodexResetsWindow" "$STAGING/$AGENT_LABEL.plist"
+  # The resource contains exactly one literal placeholder. Replacing its text preserves the
+  # one-element ProgramArguments array; `plutil -replace ProgramArguments.0` appends on some
+  # macOS versions and would pass the placeholder as a stray CLI argument.
+  sed -i '' "s|@APP_EXECUTABLE@|$TARGET/Contents/MacOS/CodexResetsWindow|" "$STAGING/$AGENT_LABEL.plist"
   plutil -lint "$STAGING/$AGENT_LABEL.plist" >/dev/null
 
   # Verify the complete replacement before moving the existing installation aside. A failed
