@@ -84,6 +84,17 @@ enum Formatters {
 // MARK: - Text helpers
 
 enum TextFormat {
+    static func compactNumber(_ value: Int64) -> String {
+        let absolute = Double(max(0, value))
+        if absolute >= 1_000_000 {
+            return String(format: "%.1fM", absolute / 1_000_000)
+        }
+        if absolute >= 1_000 {
+            return String(format: "%.1fk", absolute / 1_000)
+        }
+        return String(value)
+    }
+
     /// Compact "3m ago" / "2h 10m" style durations.
     static func countdown(_ interval: TimeInterval) -> String {
         let total = max(0, Int(interval))

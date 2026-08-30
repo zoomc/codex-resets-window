@@ -25,9 +25,10 @@ Codex Resets Window puts the useful state in one small, always-available popover
 - Shows the 5-hour and weekly remaining percentages.
 - Shows a time for the 5-hour reset and a calendar date for the weekly reset.
 - Keeps a bounded local history of those official quota readings to show burn-rate and a
-  conservative "may run dry" forecast. This is quota telemetry, not invented per-message token
-  accounting: the local Codex transcript currently does not expose reliable prompt/completion
-  token totals.
+  conservative "may run dry" forecast. When a transcript contains Codex's structured
+  `token_count` event, the popover also shows measured cumulative input/output/reasoning tokens
+  per session and across the recent local set. Transcripts without that event are reported as
+  unavailable; quota percentage is never presented as a token estimate.
 - Refreshes usage and the local session list when the popover opens.
 - Displays local Codex session titles from `~/.codex/session_index.jsonl`.
 - Opens a session when its title area is clicked.
@@ -38,7 +39,7 @@ Codex Resets Window puts the useful state in one small, always-available popover
 - Sends a local notification both when a continuation starts and when it finishes or fails.
 - Opens the matching Codex Desktop task through its `codex://threads/<session-id>` link when a title is clicked.
 - Reads the complete local session metadata before launching, restores the original working directory, and tries the installed Codex CLI locations before falling back to `PATH`. If a historical session has no usable project directory, it uses Codex's explicit no-repository mode instead of failing at the trust check.
-- Persists each enabled switch as a one-time continuation across app restarts. It remains enabled until the task completes, you turn it off, or seven hours elapse; task-completion events from the local Codex transcript clear it automatically.
+- Persists each enabled switch as a one-time continuation across app restarts. It remains enabled until the task completes, you turn it off, or seven hours elapse; task-completion events from the local Codex transcript clear it automatically. This is intentionally one-shot so a stale switch cannot re-run a side-effecting task on every future quota reset.
 - Installs a per-user macOS LaunchAgent: starts at sign-in and restarts after an abnormal exit, while the explicit **Quit** button remains final.
 - Prevents overlapping refreshes and uses a small local-only reconciliation timer only for selected, in-progress tasks.
 - Uses a lightweight local countdown without network polling.

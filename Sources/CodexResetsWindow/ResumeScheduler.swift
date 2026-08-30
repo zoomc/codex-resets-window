@@ -101,11 +101,20 @@ final class ResumeScheduler: ObservableObject {
     func isEnabled(_ session: CodexSession) -> Bool { enabledIDs.contains(session.id) }
     func activity(for session: CodexSession) -> ResumeActivity? { activities[session.id] }
     func activity(for sessionID: String) -> ResumeActivity? { activities[sessionID] }
-    var activeSessionIDs: [String] { processes.keys.sorted() }
+    var activeSessionIDs: [String] { Set(processes.keys).union(adoptedProcesses.keys).sorted() }
 
     /// Sessions that are queued, retrying or running — drives the faster tick cadence.
     var hasActiveWork: Bool {
-        records.values.contains { !$0.activity.state.isTerminal } || !processes.isEmpty
+        let now = clock.now()
+        let live = !processes.isEmpty || !adoptedProcesses.isEmpty
+        let dueSoon = records.values.contains { record in
+            switch record.activity.state {
+            case .starting, .running, .retrying: return true
+            case .queued: return record.activity.scheduledAt.map { $0 <= now.addingTimeInterval(30) } ?? false
+            case .succeeded, .failed: return false
+            }
+        }
+        return live || dueSoon
     }
 
     func continuationDate(resetAt: Date?) -> Date? {
@@ -131,13 +140,21 @@ final class ResumeScheduler: ObservableObject {
 
     // MARK: - Scheduling entry points
 
-    /// Applies a freshly fetched reset time to queued continuations that have no target yet.
+    /// Applies a freshly fetched reset time to queued continuations. Future queued runs move with
+    /// the newest reset; a manually-triggered run that is already due is left untouched.
     func schedule(resetAt: Date?) {
         pruneExpired()
         guard let resetAt else { return }
         let target = continuationDate(resetAt: resetAt)
-        for (id, record) in records where record.activity.state == .queued && record.activity.scheduledAt == nil {
-            transition(id, to: record.activity.replacing(state: .queued, scheduledAt: target))
+        let now = clock.now()
+        for (id, record) in records where record.activity.state == .queued && record.activity.trigger == .reset {
+            // A fresh usage response is authoritative for a queued future run. Do not move a
+            // manually-triggered run that is already due, or overwrite a retry in flight.
+            let shouldUpdate = record.activity.scheduledAt == nil
+                || (record.activity.scheduledAt.map { $0 > now } ?? false)
+            if shouldUpdate {
+                transition(id, to: record.activity.replacing(state: .queued, scheduledAt: target))
+            }
         }
         startDueContinuations()
     }
@@ -145,7 +162,7 @@ final class ResumeScheduler: ObservableObject {
     /// Turns a continuation on or off.
     func setEnabled(_ enabled: Bool, for session: CodexSession, resetAt: Date?) {
         if enabled {
-            guard processes[session.id] == nil else {
+            guard processes[session.id] == nil, adoptedProcesses[session.id] == nil else {
                 AppLog.warning("cannot re-arm \(session.id) until its stopping process exits", category: .continuation)
                 return
             }
@@ -175,11 +192,11 @@ final class ResumeScheduler: ObservableObject {
     /// Arms the session first when it is not armed yet, so "Run now" works from a cold start —
     /// previously the button was a no-op unless the toggle had already been flipped.
     func runNow(_ sessionID: String) {
-        guard processes[sessionID] == nil else {
+        guard processes[sessionID] == nil, adoptedProcesses[sessionID] == nil else {
             AppLog.warning("run-now ignored for \(sessionID): a process is still live", category: .continuation)
             return
         }
-        let activity = ResumeActivity(state: .queued, scheduledAt: clock.now(), attempt: 1)
+        let activity = ResumeActivity(state: .queued, scheduledAt: clock.now(), attempt: 1, trigger: .manual)
         if var record = records[sessionID] {
             record.activity = activity
             record.createdAt = clock.now()
@@ -211,7 +228,8 @@ final class ResumeScheduler: ObservableObject {
             finishedAt: nil,
             lastOutput: nil,
             exitCode: nil,
-            attempt: attempt
+            attempt: attempt,
+            trigger: .manual
         ))
         startDueContinuations()
         startTimer()
@@ -222,6 +240,11 @@ final class ResumeScheduler: ObservableObject {
         if let process = processes[sessionID], process.isRunning {
             terminate(process, for: sessionID)
             AppLog.info("stopped child process \(process.pid)", category: .continuation)
+        }
+        if let adopted = adoptedProcesses[sessionID] {
+            terminate(adopted, for: sessionID)
+            adoptedProcesses.removeValue(forKey: sessionID)
+            AppLog.info("stopped adopted child process \(adopted.pid)", category: .continuation)
         }
         deadlines.removeValue(forKey: sessionID)
         writeLedger()
@@ -241,7 +264,9 @@ final class ResumeScheduler: ObservableObject {
         // There is no run loop after an explicit app quit to deliver the delayed SIGKILL, so
         // terminate children decisively rather than risking an untracked Codex process.
         for (_, process) in processes where process.isRunning { process.stop(force: true) }
+        for (_, adopted) in adoptedProcesses { terminate(adopted, force: true) }
         processes.removeAll()
+        adoptedProcesses.removeAll()
         deadlines.removeAll()
         writeLedger()
         (store as? UserDefaultsContinuationStore)?.flushNow()
@@ -292,7 +317,7 @@ final class ResumeScheduler: ObservableObject {
 
     private func startDueContinuations() {
         let now = clock.now()
-        let running = processes.count
+        let running = processes.count + adoptedProcesses.count
         var slots = max(0, config.maxConcurrent - running)
         guard slots > 0 else { return }
 
@@ -322,7 +347,8 @@ final class ResumeScheduler: ObservableObject {
                     finishedAt: now,
                     lastOutput: ContinuationOutcome.missingSession.label,
                     attempt: records[sessionID]?.activity.attempt ?? 1,
-                    outcome: .missingSession
+                    outcome: .missingSession,
+                    trigger: records[sessionID]?.activity.trigger ?? .reset
                 ))
                 notify(title: "Codex Resets Window",
                        body: "A selected session is no longer available locally.",
@@ -349,7 +375,8 @@ final class ResumeScheduler: ObservableObject {
                 finishedAt: now,
                 lastOutput: CodexDataError.missingLogin.errorDescription.map { _ in "Codex CLI not found" } ?? "Codex CLI not found",
                 attempt: attempt,
-                outcome: .missingCLI
+                outcome: .missingCLI,
+                trigger: records[session.id]?.activity.trigger ?? .reset
             ))
             notify(title: "Codex Resets Window", body: "The Codex CLI could not be found.", identifier: "\(session.id).missing-cli", urgent: true)
             return
@@ -370,14 +397,16 @@ final class ResumeScheduler: ObservableObject {
             state: .starting,
             scheduledAt: records[session.id]?.activity.scheduledAt,
             startedAt: now,
-            attempt: attempt
+            attempt: attempt,
+            trigger: records[session.id]?.activity.trigger ?? .reset
         ))
 
         let request = LaunchRequest(
             sessionID: session.id,
             executable: executable,
             arguments: arguments,
-            workingDirectory: workingDirectory
+            workingDirectory: workingDirectory,
+            environment: Self.childEnvironment(codexHome: config.codexHome)
         )
 
         do {
@@ -407,7 +436,7 @@ final class ResumeScheduler: ObservableObject {
     /// The prompt sent to the resumed session.
     ///
     /// "Rich context" mode borrows an idea from `aqua5230/usage`: instead of a bare `continue`,
-    /// hand the model a short evidence bundle from the transcript. The intelligence still lives in
+    /// hand the model a short bundle of recent requests from the transcript. The intelligence still lives in
     /// the model's reply — the app only supplies facts, and it caps every field so a prompt can
     /// never balloon into a process argument or leak a large chunk of conversation.
     func buildPrompt(for session: CodexSession) -> String {
@@ -532,7 +561,8 @@ final class ResumeScheduler: ObservableObject {
                 exitCode: exitCode,
                 attempt: attempt + 1,
                 nextAttemptAt: next,
-                outcome: outcome
+                outcome: outcome,
+                trigger: previous?.trigger ?? .reset
             ))
             AppLog.warning("continuation \(sessionID) attempt \(attempt) failed (\(message)); retry \(attempt + 1) at \(Formatters.timeString(next))",
                            category: .continuation)
@@ -549,7 +579,8 @@ final class ResumeScheduler: ObservableObject {
                 lastOutput: message,
                 exitCode: exitCode,
                 attempt: attempt,
-                outcome: outcome
+                outcome: outcome,
+                trigger: previous?.trigger ?? .reset
             ))
             AppLog.error("continuation \(sessionID) gave up after \(attempt) attempt(s): \(message)",
                          category: .continuation)
@@ -567,7 +598,17 @@ final class ResumeScheduler: ObservableObject {
         guard config.maxRuntime > 0 else { return }
         for (sessionID, deadline) in deadlines where deadline <= now {
             guard let process = processes[sessionID] else {
-                deadlines.removeValue(forKey: sessionID)
+                if let adopted = adoptedProcesses[sessionID] {
+                    AppLog.warning("adopted continuation \(sessionID) exceeded the runtime cap; terminating",
+                                   category: .continuation)
+                    terminate(adopted, for: sessionID)
+                    adoptedProcesses.removeValue(forKey: sessionID)
+                    deadlines.removeValue(forKey: sessionID)
+                    handleFailure(sessionID: sessionID, exitCode: nil, outcome: .timeout,
+                                  detail: "Timed out after \(TextFormat.countdown(config.maxRuntime))")
+                } else {
+                    deadlines.removeValue(forKey: sessionID)
+                }
                 continue
             }
             AppLog.warning("continuation \(sessionID) exceeded the \(Int(config.maxRuntime))s runtime cap; terminating",
@@ -605,10 +646,31 @@ final class ResumeScheduler: ObservableObject {
         }
     }
 
+    private func terminate(_ entry: ProcessLedgerEntry, for sessionID: String) {
+        terminate(entry, force: false)
+        let grace = config.killGrace
+        guard grace > 0 else { return }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(grace * 1_000_000_000))
+            guard ProcessLedger.matches(entry), ProcessLedger.isAlive(pid: entry.pid) else { return }
+            AppLog.warning("adopted continuation \(sessionID) ignored SIGTERM; sending SIGKILL", category: .continuation)
+            terminate(entry, force: true)
+        }
+    }
+
+    private func terminate(_ entry: ProcessLedgerEntry, force: Bool) {
+        guard ProcessLedger.matches(entry) else {
+            AppLog.warning("refusing to signal PID \(entry.pid): process identity no longer matches", category: .continuation)
+            return
+        }
+        kill(entry.pid, force ? SIGKILL : SIGTERM)
+    }
+
     // MARK: - Reconciliation
 
     private func reconcile() {
         let now = clock.now()
+        reconcileAdoptedProcesses(now: now)
         for (sessionID, record) in records {
             switch record.activity.state {
             case .starting, .running:
@@ -622,7 +684,7 @@ final class ResumeScheduler: ObservableObject {
     private func reconcileLive(sessionID: String, record: PersistedContinuation, now: Date) {
         guard let startedAt = record.activity.startedAt else { return }
         // We are actively supervising this process; nothing to reconcile.
-        if processes[sessionID] != nil { return }
+        if processes[sessionID] != nil || adoptedProcesses[sessionID] != nil { return }
 
         guard let transcript = sessions.transcriptURL(for: sessionID),
               let attributes = try? FileManager.default.attributesOfItem(atPath: transcript.path),
@@ -640,6 +702,29 @@ final class ResumeScheduler: ObservableObject {
         let state = SessionStore.taskState(in: transcript, after: startedAt)
         transcriptObservations[sessionID] = Observation(modificationDate: modificationDate, state: state)
         applyReconciledState(sessionID: sessionID, state: state, now: now)
+    }
+
+    private func reconcileAdoptedProcesses(now: Date) {
+        for (sessionID, entry) in Array(adoptedProcesses) {
+            guard !ProcessLedger.isAlive(pid: entry.pid) else { continue }
+            adoptedProcesses.removeValue(forKey: sessionID)
+            deadlines.removeValue(forKey: sessionID)
+            guard let record = records[sessionID] else { continue }
+            let state: SessionTaskState
+            if let startedAt = record.activity.startedAt,
+               let transcript = sessions.transcriptURL(for: sessionID) {
+                state = SessionStore.taskState(in: transcript, after: startedAt)
+            } else {
+                state = .unknown
+            }
+            if state == .completed {
+                applyReconciledState(sessionID: sessionID, state: .completed, now: now)
+            } else {
+                handleFailure(sessionID: sessionID, exitCode: nil, outcome: .exitCode,
+                              detail: "Adopted Codex process exited before task completion")
+            }
+        }
+        writeLedger()
     }
 
     private func applyReconciledState(sessionID: String, state: SessionTaskState, now: Date) {
@@ -684,8 +769,17 @@ final class ResumeScheduler: ObservableObject {
                 // crash before the child exits must not forget that it already exists.
                 AppLog.warning("found a surviving child process \(entry.pid) for \(entry.sessionID)",
                                category: .continuation)
+                guard records[entry.sessionID] != nil else {
+                    AppLog.warning("found orphan process \(entry.pid) without a continuation record; attempting identity-checked termination",
+                                   category: .continuation)
+                    terminate(entry, for: entry.sessionID)
+                    continue
+                }
                 survivors.append(entry)
                 adoptedProcesses[entry.sessionID] = entry
+                if config.maxRuntime > 0 {
+                    deadlines[entry.sessionID] = entry.launchedAt.addingTimeInterval(config.maxRuntime)
+                }
                 continue
             }
             guard let record = records[entry.sessionID] else { continue }
@@ -810,6 +904,8 @@ final class ResumeScheduler: ObservableObject {
         let candidates = [
             "/Applications/Codex.app/Contents/Resources/codex",
             "/Applications/ChatGPT.app/Contents/Resources/codex",
+            "\(FileManager.default.homeDirectoryForCurrentUser.path)/Applications/Codex.app/Contents/Resources/codex",
+            "\(FileManager.default.homeDirectoryForCurrentUser.path)/Applications/ChatGPT.app/Contents/Resources/codex",
             "/opt/homebrew/bin/codex",
             "/usr/local/bin/codex",
             "/opt/local/bin/codex"
@@ -821,6 +917,22 @@ final class ResumeScheduler: ObservableObject {
             AppLog.warning("no bundled Codex CLI found; falling back to PATH", category: .continuation)
         }
         return fallback
+    }
+
+    /// Keep the resumed CLI in the same account/configuration as the dashboard while excluding
+    /// app-only flags and secrets that should never leak into a child process.
+    private static func childEnvironment(codexHome: URL) -> [String: String] {
+        let inherited = ProcessInfo.processInfo.environment
+        var environment: [String: String] = [
+            "PATH": inherited["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin",
+            "HOME": inherited["HOME"] ?? FileManager.default.homeDirectoryForCurrentUser.path,
+            "CODEX_HOME": codexHome.path
+        ]
+        for key in ["TMPDIR", "LANG", "LC_ALL", "LC_CTYPE", "SSH_AUTH_SOCK",
+                    "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "SSL_CERT_FILE", "SSL_CERT_DIR"] {
+            if let value = inherited[key], !value.isEmpty { environment[key] = value }
+        }
+        return environment
     }
 
     /// Resolves a binary through `PATH` without spawning a shell.

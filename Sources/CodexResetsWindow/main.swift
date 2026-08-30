@@ -73,6 +73,11 @@ func dumpText(_ environment: AppEnvironment) -> String {
         if let pace = model.primaryPace {
             lines.append(String(format: "pace      %.2fx of your usual", pace))
         }
+        if let tokens = model.totalTokenUsage {
+            lines.append("tokens    \(tokens.compactTotal) measured local tokens · \(model.tokenUsage.count) sessions")
+        } else {
+            lines.append("tokens    unavailable in recent transcripts")
+        }
         lines.append("updated   \(model.updatedText)")
     } else if let error = model.errorMessage {
         lines.append("usage     unavailable: \(error)")
@@ -124,6 +129,8 @@ func dumpJSON(_ environment: AppEnvironment) throws -> String {
         let pace: Double?
         let willRunDry: Bool
         let sessions: [Summary]
+        let tokenTotals: Tokens?
+        let tokenUsage: [TokenSummary]
         let continuations: [Continuation]
 
         struct Summary: Encodable {
@@ -139,6 +146,23 @@ func dumpJSON(_ environment: AppEnvironment) throws -> String {
             let outcome: String
             let scheduledAt: Date?
             let nextAttemptAt: Date?
+        }
+        struct Tokens: Encodable {
+            let inputTokens: Int64
+            let cachedInputTokens: Int64
+            let outputTokens: Int64
+            let reasoningOutputTokens: Int64
+            let totalTokens: Int64
+            let measuredAt: Date?
+        }
+        struct TokenSummary: Encodable {
+            let sessionID: String
+            let inputTokens: Int64
+            let cachedInputTokens: Int64
+            let outputTokens: Int64
+            let reasoningOutputTokens: Int64
+            let totalTokens: Int64
+            let measuredAt: Date?
         }
     }
 
@@ -156,6 +180,23 @@ func dumpJSON(_ environment: AppEnvironment) throws -> String {
                              scheduledAt: activity.scheduledAt,
                              nextAttemptAt: activity.nextAttemptAt)
     }.sorted { $0.sessionID < $1.sessionID }
+    let tokenUsage = model.tokenUsage.map { id, usage in
+        Payload.TokenSummary(sessionID: id,
+                             inputTokens: usage.inputTokens,
+                             cachedInputTokens: usage.cachedInputTokens,
+                             outputTokens: usage.outputTokens,
+                             reasoningOutputTokens: usage.reasoningOutputTokens,
+                             totalTokens: usage.totalTokens,
+                             measuredAt: usage.measuredAt)
+    }.sorted { $0.sessionID < $1.sessionID }
+    let tokenTotals = model.totalTokenUsage.map {
+        Payload.Tokens(inputTokens: $0.inputTokens,
+                       cachedInputTokens: $0.cachedInputTokens,
+                       outputTokens: $0.outputTokens,
+                       reasoningOutputTokens: $0.reasoningOutputTokens,
+                       totalTokens: $0.totalTokens,
+                       measuredAt: $0.measuredAt)
+    }
 
     let payload = Payload(version: AppVersion.current,
                           generatedAt: Formatters.plainISO.string(from: Date()),
@@ -166,6 +207,8 @@ func dumpJSON(_ environment: AppEnvironment) throws -> String {
                           pace: model.primaryPace,
                           willRunDry: model.willRunDry,
                           sessions: sessions,
+                          tokenTotals: tokenTotals,
+                          tokenUsage: tokenUsage,
                           continuations: continuations)
     let data = try encoder.encode(payload)
     return String(decoding: data, as: UTF8.self)

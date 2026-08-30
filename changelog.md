@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Added measured per-session and aggregate token totals from local `token_count` transcript events,
+  while keeping official quota percentages separate and clearly labelled.
+- Hardened continuation state observation, reset-time rescheduling, strict usage validation,
+  transcript parsing limits, task-event pairing, child environment isolation, and CLI discovery.
+- Added regression coverage for malformed usage, matching task events, reset-time changes, and
+  token event parsing.
+
 ## 0.1.0 — 2026-07-11
 
 - Initial native macOS menu-bar application.

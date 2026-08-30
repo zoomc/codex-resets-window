@@ -146,4 +146,34 @@ struct ProcessLedger: Sendable {
         guard pid > 0 else { return false }
         return kill(pid, 0) == 0
     }
+
+    /// Confirms that a ledger PID still belongs to the exact Codex resume invocation we launched.
+    /// PID liveness alone is unsafe because macOS can reuse a process identifier.
+    static func matches(_ entry: ProcessLedgerEntry) -> Bool {
+        guard isAlive(pid: entry.pid), let command = commandLine(pid: entry.pid) else { return false }
+        let normalized = command.lowercased()
+        return normalized.contains("codex")
+            && normalized.contains(" resume")
+            && command.contains(entry.sessionID)
+    }
+
+    private static func commandLine(pid: Int32) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/ps")
+        process.arguments = ["-p", String(pid), "-o", "command="]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return nil
+        }
+        guard process.terminationStatus == 0 else { return nil }
+        guard let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) else {
+            return nil
+        }
+        return output.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 }

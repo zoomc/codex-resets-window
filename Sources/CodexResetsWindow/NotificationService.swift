@@ -16,9 +16,8 @@ protocol NotificationSending: Sendable {
 
 /// Posts through `UNUserNotificationCenter`.
 ///
-/// Request identifiers now carry a timestamp. The old code reused the session id, so a second
-/// continuation for the same session silently replaced the first notification and the user never
-/// saw it.
+/// Request identifiers are scoped by event and reset cycle. The old code reused a short event key,
+/// so a primary and weekly notification in the same second could silently replace each other.
 final class SystemNotificationService: NotificationSending, @unchecked Sendable {
     var isEnabled: Bool = true
 
@@ -33,9 +32,11 @@ final class SystemNotificationService: NotificationSending, @unchecked Sendable 
             let content = UNMutableNotificationContent()
             content.title = title
             content.body = body
-            content.sound = urgent ? .defaultCritical : .default
+            // Critical alerts require a separate entitlement and user setting. Fall back to a
+            // normal sound when that setting is unavailable instead of claiming critical delivery.
+            content.sound = urgent && settings.criticalAlertSetting == .enabled ? .defaultCritical : .default
             content.categoryIdentifier = "com.codexresets.window.continuation"
-            let unique = "\(identifier).\(Int(Date().timeIntervalSince1970))"
+            let unique = "\(identifier).\(Int(Date().timeIntervalSince1970 * 1_000))"
             center.add(UNNotificationRequest(identifier: unique, content: content, trigger: nil)) { error in
                 if let error {
                     AppLog.error("notification failed: \(error.localizedDescription)", category: .notification)

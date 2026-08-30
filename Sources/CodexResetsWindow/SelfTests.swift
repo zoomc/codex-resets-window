@@ -19,6 +19,7 @@ enum SelfTests {
             ("runNowIsIdempotentWhileLive", testRunNowIsIdempotentWhileLive),
             ("successClearsTheContinuation", testSuccessClearsTheContinuation),
             ("missingSessionFailsOnce", testMissingSessionFailsOnce),
+            ("queuedScheduleTracksResetChanges", testQueuedScheduleTracksResetChanges),
             ("concurrencyLimit", testConcurrencyLimit),
             ("watchdogTerminatesHungRun", testWatchdogTerminatesHungRun),
             ("stopDoesNotRetry", testStopDoesNotRetry),
@@ -38,6 +39,8 @@ enum SelfTests {
             ("continuationRecordRoundTrip", testContinuationRecordRoundTrip),
             ("richContextPrompt", testRichContextPrompt),
             ("plainPromptStaysPlain", testPlainPromptStaysPlain),
+            ("taskStateRequiresMatchingStart", testTaskStateRequiresMatchingStart),
+            ("tokenUsageParsing", testTokenUsageParsing),
             ("textHelpers", testTextHelpers),
             ("logRedaction", testLogRedaction),
             ("usageDecodingToleratesChange", testUsageDecodingToleratesChange),
@@ -252,6 +255,31 @@ enum SelfTests {
         runner.expectEqual(launcher.launchedRequests.count, 0, "the missing session is not retried every tick")
     }
 
+    private static func testQueuedScheduleTracksResetChanges(_ runner: inout TestRunner) {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let clock = MutableClock(startingAt: start)
+        var config = makeConfig()
+        config.resetDelay = 10
+        let session = makeSession()
+        let scheduler = makeScheduler(config: config, clock: clock, launcher: FakeProcessLauncher(), sessions: [session])
+
+        scheduler.setEnabled(true, for: session, resetAt: start.addingTimeInterval(100))
+        runner.expectAlmost(scheduler.activity(for: session)?.scheduledAt?.timeIntervalSince(start) ?? -1,
+                            110, tolerance: 0.01, "initial reset time schedules the continuation")
+
+        scheduler.schedule(resetAt: start.addingTimeInterval(300))
+        runner.expectAlmost(scheduler.activity(for: session)?.scheduledAt?.timeIntervalSince(start) ?? -1,
+                            310, tolerance: 0.01, "a fresh reset time moves a future queued run")
+
+        config.maxConcurrent = 0
+        let manualScheduler = makeScheduler(config: config, clock: clock,
+                                            launcher: FakeProcessLauncher(), sessions: [session])
+        manualScheduler.runNow(session.id)
+        manualScheduler.schedule(resetAt: start.addingTimeInterval(900))
+        runner.expectAlmost(manualScheduler.activity(for: session)?.scheduledAt?.timeIntervalSince(start) ?? -1,
+                            0, tolerance: 0.01, "a manual run is not moved by a later usage refresh")
+    }
+
     // MARK: - Concurrency
 
     private static func testConcurrencyLimit(_ runner: inout TestRunner) async {
@@ -340,7 +368,10 @@ enum SelfTests {
     private static func testReconciliationCompletesFromTranscript(_ runner: inout TestRunner) async {
         // The clock starts in the past so every event written into the fixture transcript — the
         // fake uses the wall clock — counts as "after the continuation started".
-        let clock = MutableClock(startingAt: Date(timeIntervalSince1970: 1_700_000_000))
+        // Keep the deterministic clock just behind wall time used by FakeProcessLauncher when it
+        // stamps lifecycle events. A fixed 2023 epoch made this fixture fail once the test runner
+        // crossed that date, masking the reconciliation assertion itself.
+        let clock = MutableClock(startingAt: Date().addingTimeInterval(-60))
         var config = makeConfig()
         config.reconcileInterval = 1
         let launcher = FakeProcessLauncher()
@@ -359,9 +390,8 @@ enum SelfTests {
         config.codexHome = home
 
         let transcript = day.appendingPathComponent("rollout-2026-01-01T00-00-00-\(session.id).jsonl")
-        try? Data("""
-        {"timestamp":"2026-01-01T00:00:00.000Z","type":"session_meta","payload":{"id":"\(session.id)","cwd":"\(home.path)"}}
-        """.utf8).write(to: transcript)
+        let metadata = "{\"timestamp\":\"2026-01-01T00:00:00.000Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"\(session.id)\",\"cwd\":\"\(home.path)\"}}\n"
+        try? Data(metadata.utf8).write(to: transcript)
 
         launcher.transcriptURLs[session.id] = transcript
         // A long run, so the child is still alive when the app "dies".
@@ -381,14 +411,16 @@ enum SelfTests {
 
         // The app dies without shutting down: the child keeps running, the in-memory handle is
         // gone, and the ledger pid no longer exists. Meanwhile the CLI finishes its turn.
-        let completion = """
-        {"timestamp":"2026-01-01T00:05:00.000Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-1"}}
-        """
+        let completionTimestamp = Formatters.fractionalISO.string(from: Date())
+        let completion = "{\"timestamp\":\"\(completionTimestamp)\",\"type\":\"event_msg\",\"payload\":{\"type\":\"task_complete\",\"turn_id\":\"turn-1\"}}"
         if let handle = try? FileHandle(forWritingTo: transcript) {
             handle.seekToEndOfFile()
             handle.write(Data("\n\(completion)".utf8))
             try? handle.close()
         }
+        runner.expectEqual(SessionStore.taskState(in: transcript, after: clock.now().addingTimeInterval(-60)),
+                           .completed,
+                           "the transcript contains a matching completed turn")
 
         // A fresh instance adopts whatever it finds on disk.
         let relaunched = makeScheduler(config: config, clock: clock, launcher: launcher,
@@ -736,6 +768,58 @@ enum SelfTests {
         runner.expectEqual(scheduler.buildPrompt(for: session), "continue", "plain mode sends only the prompt")
     }
 
+    private static func testTaskStateRequiresMatchingStart(_ runner: inout TestRunner) {
+        do {
+            try withTemporaryDirectory { root in
+                let transcript = root.appendingPathComponent("events.jsonl")
+                let timestamp = Formatters.fractionalISO.string(from: Date())
+                let unpaired = """
+                {"timestamp":"\(timestamp)","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-1"}}
+                """
+                try unpaired.write(to: transcript, atomically: true, encoding: .utf8)
+                runner.expectEqual(SessionStore.taskState(in: transcript, after: Date().addingTimeInterval(-1)),
+                                   .unknown,
+                                   "an unpaired completion cannot finish a continuation")
+
+                let mismatched = """
+                {"timestamp":"\(timestamp)","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1"}}
+                {"timestamp":"\(timestamp)","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-2"}}
+                """
+                try mismatched.write(to: transcript, atomically: true, encoding: .utf8)
+                runner.expectEqual(SessionStore.taskState(in: transcript, after: Date().addingTimeInterval(-1)),
+                                   .running,
+                                   "a mismatched completion leaves the matching turn running")
+
+                let paired = mismatched.replacingOccurrences(of: "turn-2", with: "turn-1")
+                try paired.write(to: transcript, atomically: true, encoding: .utf8)
+                runner.expectEqual(SessionStore.taskState(in: transcript, after: Date().addingTimeInterval(-1)),
+                                   .completed,
+                                   "a matching completion marks the turn complete")
+            }
+        } catch {
+            runner.expect(false, "task state fixture failed: \(error)")
+        }
+    }
+
+    private static func testTokenUsageParsing(_ runner: inout TestRunner) {
+        do {
+            try withTemporaryDirectory { root in
+                let transcript = root.appendingPathComponent("tokens.jsonl")
+                let timestamp = Formatters.fractionalISO.string(from: Date())
+                let line = "{\"timestamp\":\"\(timestamp)\",\"type\":\"event_msg\",\"info\":{\"total_token_usage\":{\"input_tokens\":1200,\"cached_input_tokens\":300,\"output_tokens\":450,\"reasoning_output_tokens\":50,\"total_tokens\":1650}}}\n"
+                try line.write(to: transcript, atomically: true, encoding: .utf8)
+                let usage = SessionStore.tokenUsage(in: transcript, after: Date().addingTimeInterval(-1))
+                runner.expectEqual(usage?.inputTokens, 1_200)
+                runner.expectEqual(usage?.cachedInputTokens, 300)
+                runner.expectEqual(usage?.outputTokens, 450)
+                runner.expectEqual(usage?.reasoningOutputTokens, 50)
+                runner.expectEqual(usage?.totalTokens, 1_650)
+            }
+        } catch {
+            runner.expect(false, "token usage fixture failed: \(error)")
+        }
+    }
+
     // MARK: - Utilities
 
     private static func testTextHelpers(_ runner: inout TestRunner) {
@@ -805,9 +889,8 @@ enum SelfTests {
         "secondary_window":{"limit_window_seconds":604800,"reset_after_seconds":86400,
         "reset_at":1800086400,"used_percent":7}}}
         """
-        if let decoded = try? JSONDecoder().decode(UsageSnapshot.self, from: Data(wrongType.utf8)) {
-            runner.expectEqual(decoded.primary.limitWindowSeconds, 0, "a type change degrades instead of throwing")
-        }
+        runner.expectNil(try? JSONDecoder().decode(UsageSnapshot.self, from: Data(wrongType.utf8)),
+                         "a type change is rejected instead of fabricating zero usage")
     }
 
     // MARK: - Configuration

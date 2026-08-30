@@ -45,6 +45,26 @@ enum QuotaEvent: Equatable, Sendable {
         case .restored: "restored"
         }
     }
+
+    /// Stable identity for one event in one server-provided reset cycle. Including the window and
+    /// reset timestamp prevents primary/weekly alerts from replacing each other.
+    var notificationIdentifier: String {
+        "quota.\(windowKey.rawValue).\(kind).\(Int(resetAt.timeIntervalSince1970))"
+    }
+
+    private var windowKey: UsageWindowKey {
+        switch self {
+        case .warning(let window, _, _), .critical(let window, _, _),
+             .depleted(let window, _), .restored(let window, _, _): window
+        }
+    }
+
+    private var resetAt: Date {
+        switch self {
+        case .warning(_, _, let resetAt), .critical(_, _, let resetAt),
+             .depleted(_, let resetAt), .restored(_, _, let resetAt): resetAt
+        }
+    }
 }
 
 /// Per-window notification state.

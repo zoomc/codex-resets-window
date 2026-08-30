@@ -71,7 +71,7 @@ struct AppConfig: Sendable {
     var recentSessionLimit: Int = 15
     /// Prompt sent to the resumed session.
     var continuationPrompt: String = "continue"
-    /// When true, the prompt is enriched with recent user requests and a git summary.
+    /// When true, the prompt is enriched with a bounded set of recent user requests.
     var richContextContinuation: Bool = false
     /// Maximum characters taken from the transcript when building a rich prompt.
     var richContextCharacters: Int = 280

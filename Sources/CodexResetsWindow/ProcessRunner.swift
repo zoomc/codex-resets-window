@@ -6,6 +6,8 @@ struct LaunchRequest: Sendable, Equatable {
     let executable: String
     let arguments: [String]
     let workingDirectory: URL?
+    /// Explicit child environment. An empty value means "use the launcher's safe defaults".
+    let environment: [String: String]
 }
 
 /// Handle on a running child process.
@@ -38,12 +40,12 @@ final class SystemProcessLauncher: ProcessLaunching, @unchecked Sendable {
         process.currentDirectoryURL = request.workingDirectory
             ?? FileManager.default.homeDirectoryForCurrentUser
 
-        // A child that inherits our environment can pick up a nested `CODEX_HOME` or sandbox
-        // variables. Only pass through what a CLI actually needs.
-        var environment = ProcessInfo.processInfo.environment
-        for key in environment.keys where key.hasPrefix("CRW_") { environment.removeValue(forKey: key) }
-        environment.removeValue(forKey: "CODEX_SANDBOX")
-        process.environment = environment
+        // Never pass the app's full environment to a resumed session. In particular, CRW_ test
+        // controls and a nested CODEX_HOME can make a child read the wrong account or recurse into
+        // the sandbox. The scheduler supplies an explicit, minimal environment for real launches.
+        process.environment = request.environment.isEmpty
+            ? Self.safeEnvironment()
+            : request.environment
 
         let pipe = Pipe()
         process.standardOutput = pipe
@@ -59,6 +61,19 @@ final class SystemProcessLauncher: ProcessLaunching, @unchecked Sendable {
         }
         try process.run()
         return ProcessHandle(process: process)
+    }
+
+    private static func safeEnvironment() -> [String: String] {
+        let inherited = ProcessInfo.processInfo.environment
+        var result: [String: String] = [
+            "PATH": inherited["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin",
+            "HOME": inherited["HOME"] ?? FileManager.default.homeDirectoryForCurrentUser.path
+        ]
+        for key in ["TMPDIR", "LANG", "LC_ALL", "LC_CTYPE", "SSH_AUTH_SOCK",
+                    "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "SSL_CERT_FILE", "SSL_CERT_DIR"] {
+            if let value = inherited[key], !value.isEmpty { result[key] = value }
+        }
+        return result
     }
 
     private final class ProcessHandle: ContinuationProcess {

@@ -22,9 +22,10 @@ Codex Resets Window is a native macOS menu-bar companion for Codex usage. It pre
 - Usage cards use brighter pastel accents, while session switches remain compact; enabling a switch shows the scheduled `Start at HH:MM` line beneath it.
 - The 5-hour card shows a clock time while the Weekly card shows a calendar date; progress bars use explicit pastel fills rather than the system gray style.
 - The app reports the official 5-hour and weekly **quota** windows plus a local burn-rate forecast.
-  Codex's current local transcript emits quota events rather than trustworthy per-turn
-  prompt/completion token counts, so the UI deliberately does not label its estimates as exact
-  tokens.
+  Recent Codex transcripts also emit structured `token_count` events; the UI parses the newest
+  cumulative input/output/cached/reasoning/total values per session off the main actor and labels
+  them as measured local tokens. Older transcripts without that event remain explicitly
+  unavailable, and quota percentages are never used as a token estimate.
 
 ## Development
 

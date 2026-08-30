@@ -65,6 +65,7 @@ final class DashboardModel: ObservableObject {
     @Published private(set) var primaryPace: Double?
     @Published private(set) var willRunDry: Bool = false
     @Published private(set) var updatedText: String = "Not loaded"
+    @Published private(set) var tokenUsage: [String: TokenUsage] = [:]
 
     let scheduler: ResumeScheduler
 
@@ -121,6 +122,7 @@ final class DashboardModel: ObservableObject {
         let loaded = await sessionStore.loadSessions()
         sessions = loaded
         scheduler.updateSessions(loaded)
+        tokenUsage = await sessionStore.loadTokenUsage(for: loaded)
 
         do {
             let snapshot = try await service.fetchUsage()
@@ -156,7 +158,8 @@ final class DashboardModel: ObservableObject {
             }
             for event in quotaNotifier.evaluate(reading) {
                 AppLog.info("quota event \(event.kind) for \(event.title)", category: .notification)
-                notifier.post(title: event.title, body: event.body, identifier: "quota.\(event.kind)", urgent: event.isUrgent)
+                notifier.post(title: event.title, body: event.body,
+                              identifier: event.notificationIdentifier, urgent: event.isUrgent)
             }
             persistQuotaState()
         case .failure(let error):
@@ -191,6 +194,12 @@ final class DashboardModel: ObservableObject {
             resetAt: reading.snapshot.primary.resetAt,
             at: Date()
         )
+    }
+
+    var totalTokenUsage: TokenUsage? {
+        tokenUsage.values.reduce(nil) { partial, usage in
+            partial.map { $0.adding(usage) } ?? usage
+        }
     }
 
     /// Called on the title timer so the relative age stays honest without a network call.
@@ -286,7 +295,8 @@ final class StatusBarDelegate: NSObject, NSApplicationDelegate {
         popover.behavior = .transient
         popover.animates = true
         popover.contentSize = NSSize(width: 520, height: 640)
-        popover.contentViewController = NSHostingController(rootView: MenuContent(model: environment.model))
+        popover.contentViewController = NSHostingController(rootView: MenuContent(model: environment.model,
+                                                                                   scheduler: environment.scheduler))
 
         observation = environment.model.objectWillChange.sink { [weak self] _ in
             MainActor.assumeIsolated { self?.updateStatusItem() }
@@ -378,6 +388,7 @@ struct CodexTimerMark: View {
 
 struct MenuContent: View {
     @ObservedObject var model: DashboardModel
+    @ObservedObject var scheduler: ResumeScheduler
     @State private var query = ""
     @State private var showAllSessions = false
 
@@ -450,6 +461,32 @@ struct MenuContent: View {
                 .foregroundStyle(.orange)
                 .transition(.opacity)
             }
+            if let error = model.errorMessage {
+                Label("Refresh failed: \(error)", systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+            if let total = model.totalTokenUsage {
+                HStack(spacing: 5) {
+                    Image(systemName: "number")
+                    Text("Measured local tokens: \(total.compactTotal)")
+                    Text("· \(model.tokenUsage.count) sessions")
+                        .foregroundStyle(.secondary)
+                    if let measuredAt = total.measuredAt {
+                        Text("· last \(TextFormat.relativeAge(Date().timeIntervalSince(measuredAt)))")
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .help("\(total.detailDescription). Cumulative token_count totals from local Codex transcripts; quota percentages above are separate official usage data.")
+            } else if !model.sessions.isEmpty {
+                Label("Measured token stats unavailable in recent transcripts", systemImage: "number")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .help("Codex only exposes token totals for transcripts that contain a structured token_count event.")
+            }
         } else if let error = model.errorMessage {
             Label(error, systemImage: "exclamationmark.triangle")
                 .font(.caption)
@@ -500,7 +537,7 @@ struct MenuContent: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 6) {
                     ForEach(filteredSessions) { session in
-                        SessionRow(session: session, model: model)
+                        SessionRow(session: session, model: model, scheduler: scheduler)
                     }
                 }
             }
@@ -538,6 +575,7 @@ struct MenuContent: View {
 struct SessionRow: View {
     let session: CodexSession
     @ObservedObject var model: DashboardModel
+    @ObservedObject var scheduler: ResumeScheduler
 
     var body: some View {
         HStack(spacing: 8) {
@@ -553,20 +591,26 @@ struct SessionRow: View {
 
             VStack(alignment: .trailing, spacing: 2) {
                 HStack(spacing: 6) {
-                    if let activity = model.scheduler.activity(for: session) {
+                    if let activity = scheduler.activity(for: session) {
                         ResumeActivityView(activity: activity)
                     }
+                    if let tokens = model.tokenUsage[session.id] {
+                        Label(tokens.compactTotal, systemImage: "number")
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .help("Measured local tokens for this session: \(tokens.detailDescription)")
+                    }
                     Toggle("Continue after reset", isOn: Binding(
-                        get: { model.scheduler.isEnabled(session) },
-                        set: { model.scheduler.setEnabled($0, for: session, resetAt: model.reading?.snapshot.primary.resetAt) }
+                        get: { scheduler.isEnabled(session) },
+                        set: { scheduler.setEnabled($0, for: session, resetAt: model.reading?.snapshot.primary.resetAt) }
                     ))
                     .toggleStyle(.switch)
                     .controlSize(.small)
                     .labelsHidden()
                     .accessibilityLabel("Continue \(session.displayName) after reset")
                 }
-                if let activity = model.scheduler.activity(for: session) {
-                    ContinuationActions(sessionID: session.id, activity: activity, model: model)
+                if let activity = scheduler.activity(for: session) {
+                    ContinuationActions(sessionID: session.id, activity: activity, scheduler: scheduler)
                 }
             }
         }
@@ -581,20 +625,20 @@ struct SessionRow: View {
 struct ContinuationActions: View {
     let sessionID: String
     let activity: ResumeActivity
-    @ObservedObject var model: DashboardModel
+    @ObservedObject var scheduler: ResumeScheduler
 
     var body: some View {
         HStack(spacing: 8) {
             switch activity.state {
             case .queued:
-                Button("Run now") { model.scheduler.runNow(sessionID) }
+                Button("Run now") { scheduler.runNow(sessionID) }
             case .running, .starting:
-                Button("Stop") { model.scheduler.stop(sessionID) }
+                Button("Stop") { scheduler.stop(sessionID) }
             case .retrying:
-                Button("Retry now") { model.scheduler.retryNow(sessionID) }
-                Button("Stop") { model.scheduler.stop(sessionID) }
+                Button("Retry now") { scheduler.retryNow(sessionID) }
+                Button("Stop") { scheduler.stop(sessionID) }
             case .failed:
-                Button("Retry") { model.scheduler.retryNow(sessionID) }
+                Button("Retry") { scheduler.retryNow(sessionID) }
             case .succeeded:
                 EmptyView()
             }
@@ -770,7 +814,7 @@ struct DashboardView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Local Codex sessions").font(.title2.bold())
                         ForEach(model.sessions.prefix(40)) { session in
-                            SessionRow(session: session, model: model)
+                            SessionRow(session: session, model: model, scheduler: AppEnvironment.shared.scheduler)
                         }
                     }
                 }

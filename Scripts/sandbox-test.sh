@@ -83,6 +83,7 @@ JSON
   cat > "$SANDBOX/home/sessions/2026/05/03/rollout-2026-05-03T10-00-00-$SESSION_A.jsonl" <<JSON
 {"timestamp":"2026-05-03T10:00:00.000Z","type":"session_meta","payload":{"id":"$SESSION_A","cwd":"$PROJECT"}}
 {"timestamp":"2026-05-03T10:00:05.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1"}}
+{"timestamp":"2026-05-03T10:00:06.000Z","type":"event_msg","info":{"total_token_usage":{"input_tokens":1200,"cached_input_tokens":300,"output_tokens":450,"reasoning_output_tokens":50,"total_tokens":1650}}}
 JSON
 
   cat > "$SANDBOX/home/sessions/2026/05/03/rollout-2026-05-03T09-00-00-$SESSION_B.jsonl" <<JSON
@@ -180,6 +181,7 @@ note "$out"
 check_contains "lists the armed-session column header" "$out" "sessions (2)"
 check_contains "shows the session title from the index" "$out" "Sandbox alpha"
 check_contains "reports primary usage" "$out" "primary   58% remaining"
+check_contains "reports measured local tokens" "$out" "tokens    1.6k measured local tokens"
 json=$(env_for "$BIN" --dump-json 2>/dev/null)
 if echo "$json" | python3 -c 'import json,sys; json.load(sys.stdin)' 2>/dev/null; then
   ok "--dump-json emits valid JSON"
@@ -188,6 +190,8 @@ else
 fi
 check "dump reports two sessions" \
   "$(echo "$json" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["sessions"]))')" "2"
+check "dump-json reports token usage" \
+  "$(echo "$json" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["tokenUsage"]))')" "1"
 
 step "2. Happy path: arm -> launch -> succeed"
 reset_stub; echo ok > "$SANDBOX/state/mode"

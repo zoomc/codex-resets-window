@@ -46,6 +46,21 @@ struct SessionStore: Sendable {
         return Self.merge(index: Self.parseSessions(at: indexURL), threads: directory.snapshot())
     }
 
+    /// Reads measured token totals for a bounded set of recent sessions off the main actor.
+    func loadTokenUsage(for sessions: [CodexSession], limit: Int = 100) async -> [String: TokenUsage] {
+        let candidates = Array(sessions.prefix(max(0, limit)))
+        let store = self
+        return await Task.detached(priority: .utility) {
+            var result: [String: TokenUsage] = [:]
+            for session in candidates {
+                guard let transcript = store.transcriptURL(for: session.id),
+                      let usage = Self.tokenUsage(in: transcript) else { continue }
+                result[session.id] = usage
+            }
+            return result
+        }.value
+    }
+
     /// Unions both sources by id, keeping the freshest reading of each session.
     static func merge(index: [CodexSession], threads: [ThreadRecord]) -> [CodexSession] {
         var byID: [String: CodexSession] = [:]
@@ -247,7 +262,11 @@ struct SessionStore: Sendable {
 
     /// Turns a path into a directory URL, but only while it still exists on disk.
     private static func validatedDirectory(_ path: String?) -> URL? {
-        guard let path, !path.isEmpty, FileManager.default.fileExists(atPath: path) else { return nil }
+        guard let path, !path.isEmpty else { return nil }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            return nil
+        }
         return URL(fileURLWithPath: path, isDirectory: true)
     }
 
@@ -277,7 +296,7 @@ struct SessionStore: Sendable {
 
     /// Whether a `task_started` event newer than `after` has been followed by its `task_complete`.
     static func taskState(in fileURL: URL, after: Date) -> SessionTaskState {
-        guard let contents = try? String(contentsOf: fileURL, encoding: .utf8) else { return .unknown }
+        guard let contents = boundedContents(of: fileURL) else { return .unknown }
         var activeTurnID: String?
         for line in contents.split(separator: "\n") {
             guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
@@ -291,7 +310,9 @@ struct SessionStore: Sendable {
                 activeTurnID = payload["turn_id"] as? String
             } else if type == "task_complete" {
                 let turnID = payload["turn_id"] as? String
-                if activeTurnID == nil || activeTurnID == turnID {
+                // A completion without a matching start is not evidence that our attempt
+                // finished; accepting it made unrelated historical events mark a run successful.
+                if let activeTurnID, activeTurnID == turnID {
                     return .completed
                 }
             }
@@ -305,7 +326,7 @@ struct SessionStore: Sendable {
     /// truncated hard, so a prompt can never leak a large chunk of conversation into a process
     /// argument or a log line.
     static func recentRequests(in fileURL: URL, limit: Int, characterBudget: Int) -> [String] {
-        guard let contents = try? String(contentsOf: fileURL, encoding: .utf8) else { return [] }
+        guard limit > 0, characterBudget > 0, let contents = boundedContents(of: fileURL) else { return [] }
         var results: [String] = []
         for line in contents.split(separator: "\n").reversed() {
             guard results.count < limit else { break }
@@ -331,5 +352,64 @@ struct SessionStore: Sendable {
             if !results.contains(clipped) { results.append(clipped) }
         }
         return results
+    }
+
+    /// Returns the newest cumulative `token_count` event in a local transcript.
+    static func tokenUsage(in fileURL: URL, after: Date? = nil) -> TokenUsage? {
+        guard let contents = boundedContents(of: fileURL) else { return nil }
+        for line in contents.split(separator: "\n").reversed() {
+            guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+                  object["type"] as? String == "event_msg",
+                  let timestamp = object["timestamp"] as? String,
+                  let eventDate = Formatters.parseTimestamp(timestamp),
+                  after.map({ eventDate >= $0 }) ?? true else { continue }
+            let payload = (object["payload"] as? [String: Any]) ?? [:]
+            guard let info = (object["info"] as? [String: Any]) ?? (payload["info"] as? [String: Any]),
+                  let totals = info["total_token_usage"] as? [String: Any],
+                  let input = integer(totals["input_tokens"]),
+                  let output = integer(totals["output_tokens"]),
+                  input >= 0, output >= 0 else { continue }
+            return TokenUsage(
+                inputTokens: input,
+                cachedInputTokens: integer(totals["cached_input_tokens"]) ?? 0,
+                outputTokens: output,
+                reasoningOutputTokens: integer(totals["reasoning_output_tokens"]) ?? 0,
+                totalTokens: integer(totals["total_tokens"]),
+                measuredAt: eventDate
+            )
+        }
+        return nil
+    }
+
+    private static func integer(_ value: Any?) -> Int64? {
+        if let number = value as? NSNumber { return number.int64Value }
+        if let number = value as? Int64 { return number }
+        if let number = value as? Int { return Int64(number) }
+        if let number = value as? Double, number.isFinite, number >= 0, number <= Double(Int64.max) {
+            return Int64(number.rounded())
+        }
+        return nil
+    }
+
+    /// Reads only the tail of a transcript so a multi-gigabyte rollout cannot block reconciliation
+    /// or allocate an unbounded string on the main actor. The first partial line is discarded.
+    private static func boundedContents(of fileURL: URL, maxBytes: Int = 8 * 1024 * 1024) -> String? {
+        guard let handle = try? FileHandle(forReadingFrom: fileURL) else { return nil }
+        defer { try? handle.close() }
+        let size = ((try? handle.seekToEnd()) ?? 0)
+        let offset = size > UInt64(maxBytes) ? size - UInt64(maxBytes) : 0
+        do {
+            try handle.seek(toOffset: offset)
+            let data = try handle.readToEnd() ?? Data()
+            guard !data.isEmpty else { return nil }
+            var text = String(decoding: data, as: UTF8.self)
+            if offset > 0, let newline = text.firstIndex(of: "\n") {
+                text = String(text[text.index(after: newline)...])
+            }
+            return text
+        } catch {
+            AppLog.warning("bounded transcript read failed: \(error.localizedDescription)", category: .session)
+            return nil
+        }
     }
 }

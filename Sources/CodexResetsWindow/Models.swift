@@ -38,6 +38,12 @@ enum ResumeRunState: String, Codable, Sendable, CaseIterable {
     }
 }
 
+/// Why a queued continuation was created. A manual run must not be moved by a later quota refresh.
+enum ResumeTrigger: String, Codable, Sendable {
+    case reset
+    case manual
+}
+
 /// Why a continuation stopped. Kept separate from the state so the UI can explain itself.
 enum ContinuationOutcome: String, Codable, Sendable {
     case none
@@ -74,6 +80,8 @@ struct ResumeActivity: Codable, Equatable, Sendable {
     let nextAttemptAt: Date?
     /// Machine-readable reason the run ended.
     let outcome: ContinuationOutcome
+    /// Whether the schedule came from a reset observation or an explicit user action.
+    let trigger: ResumeTrigger
 
     init(
         state: ResumeRunState,
@@ -84,7 +92,8 @@ struct ResumeActivity: Codable, Equatable, Sendable {
         exitCode: Int32? = nil,
         attempt: Int = 1,
         nextAttemptAt: Date? = nil,
-        outcome: ContinuationOutcome = .none
+        outcome: ContinuationOutcome = .none,
+        trigger: ResumeTrigger = .reset
     ) {
         self.state = state
         self.scheduledAt = scheduledAt
@@ -95,6 +104,7 @@ struct ResumeActivity: Codable, Equatable, Sendable {
         self.attempt = max(1, attempt)
         self.nextAttemptAt = nextAttemptAt
         self.outcome = outcome
+        self.trigger = trigger
     }
 
     /// Returns a copy with selected fields replaced.
@@ -107,7 +117,8 @@ struct ResumeActivity: Codable, Equatable, Sendable {
         exitCode: Int32?? = nil,
         attempt: Int? = nil,
         nextAttemptAt: Date?? = nil,
-        outcome: ContinuationOutcome? = nil
+        outcome: ContinuationOutcome? = nil,
+        trigger: ResumeTrigger? = nil
     ) -> ResumeActivity {
         ResumeActivity(
             state: state ?? self.state,
@@ -118,12 +129,13 @@ struct ResumeActivity: Codable, Equatable, Sendable {
             exitCode: (exitCode ?? self.exitCode),
             attempt: attempt ?? self.attempt,
             nextAttemptAt: (nextAttemptAt ?? self.nextAttemptAt),
-            outcome: outcome ?? self.outcome
+            outcome: outcome ?? self.outcome,
+            trigger: trigger ?? self.trigger
         )
     }
 
     private enum CodingKeys: String, CodingKey {
-        case state, scheduledAt, startedAt, finishedAt, lastOutput, exitCode, attempt, nextAttemptAt, outcome
+        case state, scheduledAt, startedAt, finishedAt, lastOutput, exitCode, attempt, nextAttemptAt, outcome, trigger
     }
 
     init(from decoder: Decoder) throws {
@@ -137,6 +149,7 @@ struct ResumeActivity: Codable, Equatable, Sendable {
         attempt = (try? container.decode(Int.self, forKey: .attempt)) ?? 1
         nextAttemptAt = try? container.decode(Date.self, forKey: .nextAttemptAt)
         outcome = (try? container.decode(ContinuationOutcome.self, forKey: .outcome)) ?? .none
+        trigger = (try? container.decode(ResumeTrigger.self, forKey: .trigger)) ?? .reset
     }
 }
 
@@ -188,10 +201,22 @@ struct UsageWindow: Codable, Equatable, Sendable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        limitWindowSeconds = (try? container.decode(TimeInterval.self, forKey: .limitWindowSeconds)) ?? 0
-        resetAfterSeconds = (try? container.decode(TimeInterval.self, forKey: .resetAfterSeconds)) ?? 0
-        resetAt = Date(timeIntervalSince1970: (try? container.decode(TimeInterval.self, forKey: .resetAt)) ?? 0)
-        usedPercent = (try? container.decode(Int.self, forKey: .usedPercent)) ?? 0
+        limitWindowSeconds = try container.decode(TimeInterval.self, forKey: .limitWindowSeconds)
+        resetAfterSeconds = try container.decode(TimeInterval.self, forKey: .resetAfterSeconds)
+        let resetTimestamp = try container.decode(TimeInterval.self, forKey: .resetAt)
+        let usedValue = try container.decode(Double.self, forKey: .usedPercent)
+        guard limitWindowSeconds.isFinite, limitWindowSeconds > 0,
+              resetAfterSeconds.isFinite, resetAfterSeconds >= 0,
+              resetTimestamp.isFinite, resetTimestamp > 1_600_000_000,
+              usedValue.isFinite, usedValue >= 0, usedValue <= 100 else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .resetAt,
+                in: container,
+                debugDescription: "Usage window contains an invalid range"
+            )
+        }
+        resetAt = Date(timeIntervalSince1970: resetTimestamp)
+        usedPercent = Int(usedValue.rounded())
     }
 
     var remainingPercent: Int { TextFormat.clampPercent(100 - usedPercent) }
@@ -291,4 +316,52 @@ enum SessionTaskState: Equatable, Sendable {
     case unknown
     case running
     case completed
+}
+
+/// Token totals emitted by Codex's local `token_count` transcript event.
+///
+/// These are measured local session totals, not a reconstruction from quota percentage. Older
+/// transcripts may not contain this event, in which case the UI deliberately reports unavailable.
+struct TokenUsage: Equatable, Sendable {
+    let inputTokens: Int64
+    let cachedInputTokens: Int64
+    let outputTokens: Int64
+    let reasoningOutputTokens: Int64
+    let totalTokens: Int64
+    let measuredAt: Date?
+
+    init(inputTokens: Int64, cachedInputTokens: Int64, outputTokens: Int64,
+         reasoningOutputTokens: Int64, totalTokens: Int64? = nil, measuredAt: Date? = nil) {
+        let safeInput = max(0, inputTokens)
+        let safeCached = max(0, cachedInputTokens)
+        let safeOutput = max(0, outputTokens)
+        let safeReasoning = max(0, reasoningOutputTokens)
+        self.inputTokens = safeInput
+        self.cachedInputTokens = safeCached
+        self.outputTokens = safeOutput
+        self.reasoningOutputTokens = safeReasoning
+        self.totalTokens = max(0, totalTokens ?? Self.saturatingAdd(safeInput, safeOutput))
+        self.measuredAt = measuredAt
+    }
+
+    func adding(_ other: TokenUsage) -> TokenUsage {
+        TokenUsage(
+            inputTokens: Self.saturatingAdd(inputTokens, other.inputTokens),
+            cachedInputTokens: Self.saturatingAdd(cachedInputTokens, other.cachedInputTokens),
+            outputTokens: Self.saturatingAdd(outputTokens, other.outputTokens),
+            reasoningOutputTokens: Self.saturatingAdd(reasoningOutputTokens, other.reasoningOutputTokens),
+            totalTokens: Self.saturatingAdd(totalTokens, other.totalTokens),
+            measuredAt: [measuredAt, other.measuredAt].compactMap { $0 }.max()
+        )
+    }
+
+    var compactTotal: String { TextFormat.compactNumber(totalTokens) }
+    var detailDescription: String {
+        "input \(TextFormat.compactNumber(inputTokens)) · cached \(TextFormat.compactNumber(cachedInputTokens)) · output \(TextFormat.compactNumber(outputTokens)) · reasoning \(TextFormat.compactNumber(reasoningOutputTokens))"
+    }
+
+    private static func saturatingAdd(_ lhs: Int64, _ rhs: Int64) -> Int64 {
+        let (value, overflow) = lhs.addingReportingOverflow(rhs)
+        return overflow ? Int64.max : value
+    }
 }
