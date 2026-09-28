@@ -279,8 +279,17 @@ final class AdaptivePopoverController: NSHostingController<MenuContent> {
     var minPopoverHeight: CGFloat = 280
     private var lastHeight: CGFloat = 0
 
+    /// Call before showing the popover so the first visible layout always re-reports,
+    /// even if a pass ran while it was closed.
+    func invalidateCachedHeight() { lastHeight = 0 }
+
     override func viewDidLayout() {
         super.viewDidLayout()
+        // Skip passes while detached or hidden: the model ticks every 30s and re-renders
+        // this view even with the popover closed, and the offscreen fittingSize (scrollable
+        // content has no intrinsic height) would poison the size used for the next open.
+        // That is why the first open looked right and later ones shifted.
+        guard view.window?.isVisible == true else { return }
         let fitting = view.fittingSize
         guard fitting.height.isFinite, fitting.height > 0 else { return }
         let target = min(max(fitting.height, minPopoverHeight), maxPopoverHeight)
@@ -295,6 +304,7 @@ final class StatusBarDelegate: NSObject, NSApplicationDelegate {
     private let environment: AppEnvironment
     private var statusItem: NSStatusItem?
     private var popover = NSPopover()
+    private var popoverController: AdaptivePopoverController?
     private var ticker: Timer?
     private var observation: AnyCancellable?
     private var lastTitle: String?
@@ -318,8 +328,10 @@ final class StatusBarDelegate: NSObject, NSApplicationDelegate {
         popover.behavior = .transient
         popover.animates = true
         popover.contentSize = NSSize(width: 520, height: 400)
-        popover.contentViewController = AdaptivePopoverController(rootView: MenuContent(model: environment.model,
-                                                                                   scheduler: environment.scheduler))
+        let controller = AdaptivePopoverController(rootView: MenuContent(model: environment.model,
+                                                                         scheduler: environment.scheduler))
+        popoverController = controller
+        popover.contentViewController = controller
 
         observation = environment.model.objectWillChange.sink { [weak self] _ in
             MainActor.assumeIsolated { self?.updateStatusItem() }
@@ -375,6 +387,9 @@ final class StatusBarDelegate: NSObject, NSApplicationDelegate {
             popover.performClose(nil)
         } else {
             Task { await environment.model.refresh(reason: .popover) }
+            // Force a fresh size report on open: passes that ran while closed are ignored
+            // by the controller, so without this the popover could reopen at a stale size.
+            popoverController?.invalidateCachedHeight()
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         }
     }
