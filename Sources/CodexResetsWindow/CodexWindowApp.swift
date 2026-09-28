@@ -269,6 +269,10 @@ final class DashboardModel: ObservableObject {
 
 /// Hosting controller that keeps the popover height adaptive: it hugs the SwiftUI content
 /// height up to `maxPopoverHeight`, beyond which the inner session list scrolls.
+///
+/// It only reports `preferredContentSize` and lets `NSPopover` keep the arrow anchored.
+/// Manually moving the popover window here fights the open animation and drifts the arrow
+/// up into the menu bar.
 @MainActor
 final class AdaptivePopoverController: NSHostingController<MenuContent> {
     var maxPopoverHeight: CGFloat = 640
@@ -283,16 +287,6 @@ final class AdaptivePopoverController: NSHostingController<MenuContent> {
         guard abs(target - lastHeight) > 1 else { return }
         lastHeight = target
         preferredContentSize = NSSize(width: 520, height: target)
-        if let window = view.window {
-            var frame = window.frame
-            let delta = target - frame.size.height
-            if abs(delta) > 0.5 {
-                frame.origin.y -= delta
-                frame.size.height = target
-                frame.size.width = 520
-                window.setFrame(frame, display: true, animate: true)
-            }
-        }
     }
 }
 
