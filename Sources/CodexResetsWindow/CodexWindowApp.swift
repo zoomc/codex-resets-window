@@ -267,6 +267,35 @@ final class DashboardModel: ObservableObject {
 
 // MARK: - Status bar delegate
 
+/// Hosting controller that keeps the popover height adaptive: it hugs the SwiftUI content
+/// height up to `maxPopoverHeight`, beyond which the inner session list scrolls.
+@MainActor
+final class AdaptivePopoverController: NSHostingController<MenuContent> {
+    var maxPopoverHeight: CGFloat = 640
+    var minPopoverHeight: CGFloat = 280
+    private var lastHeight: CGFloat = 0
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        let fitting = view.fittingSize
+        guard fitting.height.isFinite, fitting.height > 0 else { return }
+        let target = min(max(fitting.height, minPopoverHeight), maxPopoverHeight)
+        guard abs(target - lastHeight) > 1 else { return }
+        lastHeight = target
+        preferredContentSize = NSSize(width: 520, height: target)
+        if let window = view.window {
+            var frame = window.frame
+            let delta = target - frame.size.height
+            if abs(delta) > 0.5 {
+                frame.origin.y -= delta
+                frame.size.height = target
+                frame.size.width = 520
+                window.setFrame(frame, display: true, animate: true)
+            }
+        }
+    }
+}
+
 @MainActor
 final class StatusBarDelegate: NSObject, NSApplicationDelegate {
     private let environment: AppEnvironment
@@ -294,8 +323,8 @@ final class StatusBarDelegate: NSObject, NSApplicationDelegate {
 
         popover.behavior = .transient
         popover.animates = true
-        popover.contentSize = NSSize(width: 520, height: 640)
-        popover.contentViewController = NSHostingController(rootView: MenuContent(model: environment.model,
+        popover.contentSize = NSSize(width: 520, height: 400)
+        popover.contentViewController = AdaptivePopoverController(rootView: MenuContent(model: environment.model,
                                                                                    scheduler: environment.scheduler))
 
         observation = environment.model.objectWillChange.sink { [weak self] _ in
@@ -403,6 +432,8 @@ struct MenuContent: View {
         }
         .padding(12)
         .frame(width: 520)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxHeight: 640)
     }
 
     private var header: some View {
@@ -547,8 +578,9 @@ struct MenuContent: View {
                         SessionRow(session: session, model: model, scheduler: scheduler)
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(minHeight: 140, maxHeight: 360)
+            .frame(maxHeight: 360)
             let hidden = matchedSessions.count - filteredSessions.count
             if hidden > 0 || visibleCount > initialLimit {
                 HStack(spacing: 12) {
