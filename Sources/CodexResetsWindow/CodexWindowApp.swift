@@ -273,27 +273,54 @@ final class DashboardModel: ObservableObject {
 /// It only reports `preferredContentSize` and lets `NSPopover` keep the arrow anchored.
 /// Manually moving the popover window here fights the open animation and drifts the arrow
 /// up into the menu bar.
+///
+/// Two extra guards keep reopen positioning stable:
+/// - Passes that run while detached/hidden are ignored. The model ticks every 30s and
+///   re-renders this view even with the popover closed, and the offscreen fittingSize
+///   (scrollable content has no intrinsic height) would poison the next open.
+/// - Reports are debounced and same-value sets are skipped. SwiftUI settles through
+///   several passes per update and a single pass can spike; reporting the spike yanks
+///   the popover and slides the arrow off the status item, and even a same-value set
+///   can make NSPopover recompute its anchor.
 @MainActor
 final class AdaptivePopoverController: NSHostingController<MenuContent> {
+    weak var popover: NSPopover?
     var maxPopoverHeight: CGFloat = 640
     var minPopoverHeight: CGFloat = 280
     private var lastHeight: CGFloat = 0
+    private var reportGeneration = 0
 
-    /// Call before showing the popover so the first visible layout always re-reports,
-    /// even if a pass ran while it was closed.
-    func invalidateCachedHeight() { lastHeight = 0 }
+    /// Call before showing the popover so the first visible layout always re-evaluates,
+    /// and any debounced report from before the open is dropped.
+    func invalidateCachedHeight() {
+        lastHeight = 0
+        reportGeneration += 1
+    }
 
     override func viewDidLayout() {
         super.viewDidLayout()
-        // Skip passes while detached or hidden: the model ticks every 30s and re-renders
-        // this view even with the popover closed, and the offscreen fittingSize (scrollable
-        // content has no intrinsic height) would poison the size used for the next open.
-        // That is why the first open looked right and later ones shifted.
+        guard view.window?.isVisible == true else { return }
+        let fitting = view.fittingSize
+        guard fitting.height.isFinite, fitting.height > 0 else { return }
+        reportGeneration += 1
+        let generation = reportGeneration
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(120))
+            guard let self, generation == self.reportGeneration else { return }
+            self.reportNow()
+        }
+    }
+
+    private func reportNow() {
         guard view.window?.isVisible == true else { return }
         let fitting = view.fittingSize
         guard fitting.height.isFinite, fitting.height > 0 else { return }
         let target = min(max(fitting.height, minPopoverHeight), maxPopoverHeight)
-        guard abs(target - lastHeight) > 1 else { return }
+        let current = popover?.contentSize.height ?? lastHeight
+        guard abs(target - current) > 1 else {
+            lastHeight = target
+            return
+        }
         lastHeight = target
         preferredContentSize = NSSize(width: 520, height: target)
     }
@@ -330,6 +357,7 @@ final class StatusBarDelegate: NSObject, NSApplicationDelegate {
         popover.contentSize = NSSize(width: 520, height: 400)
         let controller = AdaptivePopoverController(rootView: MenuContent(model: environment.model,
                                                                          scheduler: environment.scheduler))
+        controller.popover = popover
         popoverController = controller
         popover.contentViewController = controller
 
