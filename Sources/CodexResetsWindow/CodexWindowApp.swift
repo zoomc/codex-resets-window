@@ -390,7 +390,7 @@ struct MenuContent: View {
     @ObservedObject var model: DashboardModel
     @ObservedObject var scheduler: ResumeScheduler
     @State private var query = ""
-    @State private var showAllSessions = false
+    @State private var visibleCount = 5
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -496,20 +496,26 @@ struct MenuContent: View {
         }
     }
 
-    private var filteredSessions: [CodexSession] {
-        let base = query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    private var matchedSessions: [CodexSession] {
+        query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? model.sessions
             : model.sessions.filter { $0.displayName.localizedCaseInsensitiveContains(query) }
-        if showAllSessions || base.count <= visibleLimit { return base }
+    }
+
+    private var filteredSessions: [CodexSession] {
+        let base = matchedSessions
+        let limit = max(initialLimit, visibleCount)
+        if base.count <= limit { return base }
         // Always keep armed sessions visible, even when the list is collapsed.
         let armed = Set(model.scheduler.enabledIDs)
         var result = base.filter { armed.contains($0.id) }
         let remaining = base.filter { !armed.contains($0.id) }
-        result.append(contentsOf: remaining.prefix(max(0, visibleLimit - result.count)))
+        result.append(contentsOf: remaining.prefix(max(0, limit - result.count)))
         return result
     }
 
-    private var visibleLimit: Int { model.sessions.isEmpty ? 0 : AppEnvironment.shared.config.recentSessionLimit }
+    private var initialLimit: Int { AppEnvironment.shared.config.recentSessionLimit }
+    private var pageStep: Int { AppEnvironment.shared.config.sessionPageStep }
 
     @ViewBuilder
     private var sessionSection: some View {
@@ -522,6 +528,7 @@ struct MenuContent: View {
             TextField("Search sessions", text: $query)
                 .textFieldStyle(.roundedBorder)
                 .font(.callout)
+                .onChange(of: query) { _, _ in visibleCount = initialLimit }
         }
         if model.sessions.isEmpty {
             Text("No local sessions found")
@@ -542,13 +549,24 @@ struct MenuContent: View {
                 }
             }
             .frame(minHeight: 140, maxHeight: 360)
-            let hidden = model.sessions.count - filteredSessions.count
-            if hidden > 0 || showAllSessions {
-                Button(showAllSessions ? "Show fewer" : "Show all \(model.sessions.count) sessions") {
-                    showAllSessions.toggle()
+            let hidden = matchedSessions.count - filteredSessions.count
+            if hidden > 0 || visibleCount > initialLimit {
+                HStack(spacing: 12) {
+                    if hidden > 0 {
+                        Button("More (\(hidden) remaining)") {
+                            visibleCount += pageStep
+                        }
+                        .buttonStyle(.link)
+                        .font(.caption)
+                    }
+                    if visibleCount > initialLimit {
+                        Button("Show fewer") {
+                            visibleCount = initialLimit
+                        }
+                        .buttonStyle(.link)
+                        .font(.caption)
+                    }
                 }
-                .buttonStyle(.link)
-                .font(.caption)
             }
         }
     }
@@ -770,6 +788,10 @@ struct PastelProgressBar: View {
 
 struct DashboardView: View {
     @ObservedObject var model: DashboardModel
+    @State private var visibleCount = 5
+
+    private var initialLimit: Int { AppEnvironment.shared.config.recentSessionLimit }
+    private var pageStep: Int { AppEnvironment.shared.config.sessionPageStep }
 
     var body: some View {
         ZStack {
@@ -813,8 +835,26 @@ struct DashboardView: View {
 
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Local Codex sessions").font(.title2.bold())
-                        ForEach(model.sessions.prefix(40)) { session in
+                        ForEach(model.sessions.prefix(max(initialLimit, visibleCount))) { session in
                             SessionRow(session: session, model: model, scheduler: AppEnvironment.shared.scheduler)
+                        }
+                        let hidden = model.sessions.count - min(model.sessions.count, max(initialLimit, visibleCount))
+                        if hidden > 0 || visibleCount > initialLimit {
+                            HStack(spacing: 12) {
+                                if hidden > 0 {
+                                    Button("More (\(hidden) remaining)") {
+                                        visibleCount += pageStep
+                                    }
+                                    .buttonStyle(.link)
+                                }
+                                if visibleCount > initialLimit {
+                                    Button("Show fewer") {
+                                        visibleCount = initialLimit
+                                    }
+                                    .buttonStyle(.link)
+                                }
+                            }
+                            .font(.callout)
                         }
                     }
                 }

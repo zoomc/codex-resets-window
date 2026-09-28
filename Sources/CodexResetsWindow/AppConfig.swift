@@ -67,8 +67,10 @@ struct AppConfig: Sendable {
 
     // MARK: - Presentation
 
-    /// How many recent sessions the menu shows before collapsing the rest.
-    var recentSessionLimit: Int = 15
+    /// How many recent sessions are shown initially before the More button pages in the rest.
+    var recentSessionLimit: Int = 5
+    /// How many additional sessions each More press reveals.
+    var sessionPageStep: Int = 10
     /// Prompt sent to the resumed session.
     var continuationPrompt: String = "continue"
     /// When true, the prompt is enriched with a bounded set of recent user requests.
@@ -137,6 +139,7 @@ struct AppConfig: Sendable {
         config.etaMinSpan = env.time("CRW_ETA_MIN_SPAN", default: config.etaMinSpan)
 
         config.recentSessionLimit = env.int("CRW_RECENT_LIMIT", default: config.recentSessionLimit)
+        config.sessionPageStep = max(1, env.int("CRW_PAGE_STEP", default: config.sessionPageStep))
         config.continuationPrompt = env.string("CRW_PROMPT") ?? config.continuationPrompt
         config.richContextContinuation = env.bool("CRW_RICH_CONTEXT")
         config.richContextCharacters = env.int("CRW_RICH_CHARS", default: config.richContextCharacters)
