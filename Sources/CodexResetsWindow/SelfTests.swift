@@ -20,6 +20,7 @@ enum SelfTests {
             ("successClearsTheContinuation", testSuccessClearsTheContinuation),
             ("missingSessionFailsOnce", testMissingSessionFailsOnce),
             ("queuedScheduleTracksResetChanges", testQueuedScheduleTracksResetChanges),
+            ("resetReachedRunDoesNotMove", testResetReachedRunDoesNotMove),
             ("concurrencyLimit", testConcurrencyLimit),
             ("watchdogTerminatesHungRun", testWatchdogTerminatesHungRun),
             ("stopDoesNotRetry", testStopDoesNotRetry),
@@ -278,6 +279,27 @@ enum SelfTests {
         manualScheduler.schedule(resetAt: start.addingTimeInterval(900))
         runner.expectAlmost(manualScheduler.activity(for: session)?.scheduledAt?.timeIntervalSince(start) ?? -1,
                             0, tolerance: 0.01, "a manual run is not moved by a later usage refresh")
+    }
+
+    /// Regression: a refresh landing between the reset and the delayed fire must not move the
+    /// run to the next window, or the continuation perpetually recedes and never runs.
+    private static func testResetReachedRunDoesNotMove(_ runner: inout TestRunner) {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let clock = MutableClock(startingAt: start)
+        var config = makeConfig()
+        config.resetDelay = 10
+        let session = makeSession()
+        let scheduler = makeScheduler(config: config, clock: clock,
+                                      launcher: FakeProcessLauncher(), sessions: [session])
+
+        scheduler.setEnabled(true, for: session, resetAt: start.addingTimeInterval(100))
+        // The awaited reset (start+100) has arrived; the fire (start+110) is 5s out when a
+        // usage refresh reports a much later window.
+        clock.advance(105)
+        scheduler.schedule(resetAt: start.addingTimeInterval(9999))
+        runner.expectAlmost(scheduler.activity(for: session)?.scheduledAt?.timeIntervalSince(start) ?? -1,
+                            110, tolerance: 0.01, "a run whose reset already arrived keeps its armed fire time")
+        runner.expectEqual(scheduler.activity(for: session)?.state, .queued)
     }
 
     // MARK: - Concurrency

@@ -142,6 +142,11 @@ final class ResumeScheduler: ObservableObject {
 
     /// Applies a freshly fetched reset time to queued continuations. Future queued runs move with
     /// the newest reset; a manually-triggered run that is already due is left untouched.
+    ///
+    /// Once the reset a run was waiting for has arrived (`now >= scheduledAt - resetDelay`),
+    /// the run is frozen: it must fire at its armed time and must not chase the next window.
+    /// Without this, a usage refresh landing in the post-reset delay gap moves the target to
+    /// the following window, and the continuation perpetually recedes instead of running.
     func schedule(resetAt: Date?) {
         pruneExpired()
         guard let resetAt else { return }
@@ -150,6 +155,10 @@ final class ResumeScheduler: ObservableObject {
         for (id, record) in records where record.activity.state == .queued && record.activity.trigger == .reset {
             // A fresh usage response is authoritative for a queued future run. Do not move a
             // manually-triggered run that is already due, or overwrite a retry in flight.
+            let resetReached = record.activity.scheduledAt.map {
+                $0.addingTimeInterval(-config.resetDelay) <= now
+            } ?? false
+            guard !resetReached else { continue }
             let shouldUpdate = record.activity.scheduledAt == nil
                 || (record.activity.scheduledAt.map { $0 > now } ?? false)
             if shouldUpdate {
