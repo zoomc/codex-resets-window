@@ -155,6 +155,15 @@ struct AppConfig: Sendable {
         if config.isSandbox {
             config.defaultsSuite = env.string("CRW_SUITE") ?? "com.codexresets.window.sandbox"
         }
+        // Mirror logs to disk by default for the real app. A continuation that silently fails is
+        // nearly impossible to diagnose from the UI alone, and the unified log needs a working
+        // `/usr/bin/log` plus the right predicate. Sandbox and headless runs stay quiet so the
+        // test scripts never write into the user's support directory.
+        if !config.isSandbox && !config.isHeadless {
+            config.logDirectory = FileManager.default
+                .homeDirectoryForCurrentUser
+                .appendingPathComponent("Library/Application Support/CodexResetsWindow", isDirectory: true)
+        }
         if let path = env.string("CRW_LOG_DIR") {
             config.logDirectory = URL(fileURLWithPath: (path as NSString).expandingTildeInPath, isDirectory: true)
         }

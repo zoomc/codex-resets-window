@@ -551,7 +551,7 @@ final class ResumeScheduler: ObservableObject {
 
         let message: String = {
             if let detail, !detail.isEmpty { return TextFormat.lastMeaningfulLine(detail) ?? outcome.label }
-            if let exitCode { return "Exited with code \(exitCode)" }
+            if let exitCode { return Self.failureMessage(exitCode: exitCode, lastOutput: previous?.lastOutput) }
             return outcome.label
         }()
 
@@ -599,6 +599,22 @@ final class ResumeScheduler: ObservableObject {
                    urgent: true)
         }
         startTimer()
+    }
+
+    /// Why a child died, in words the user can act on.
+    ///
+    /// The old code reported only "Exited with code N" and discarded the child's own last line.
+    /// That hid the most useful fact in this subsystem: an npm-installed `codex` is a
+    /// `#!/usr/bin/env node` script, so a child `PATH` without `node` yields a bare 127 while the
+    /// real reason (`env: node: No such file or directory`) never reaches the UI.
+    private static func failureMessage(exitCode: Int32, lastOutput: String?) -> String {
+        let tail = lastOutput.flatMap { TextFormat.lastMeaningfulLine($0) }
+        if exitCode == 127 {
+            return tail.map { "Codex CLI could not start: \($0)" }
+                ?? "Codex CLI could not start (exit 127): it or its runtime is not on the app PATH"
+        }
+        if let tail, !tail.isEmpty { return "\(tail) (exit \(exitCode))" }
+        return "Exited with code \(exitCode)"
     }
 
     // MARK: - Watchdog
@@ -920,10 +936,17 @@ final class ResumeScheduler: ObservableObject {
             "/opt/local/bin/codex"
         ]
         let resolved = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) })
-        let fallback = resolved ?? (Self.locateOnPATH("codex") ? "/usr/bin/env" : nil)
+        let fallback = resolved ?? (ToolchainPaths.locate("codex").map { _ in "/usr/bin/env" })
         if let fallback { cachedExecutable = (fallback, now) }
-        if resolved == nil, fallback != nil {
-            AppLog.warning("no bundled Codex CLI found; falling back to PATH", category: .continuation)
+        if let resolved {
+            AppLog.info("codex CLI resolved to \(resolved)", category: .continuation)
+        } else if fallback != nil {
+            // `/usr/bin/env codex` only works because the child receives ToolchainPaths.value.
+            // Without a node runtime on that PATH an npm-installed codex exits 127 immediately.
+            AppLog.warning("no bundled Codex CLI found; using PATH (node runtime on child PATH: \(ToolchainPaths.hasNodeRuntime()))",
+                           category: .continuation)
+        } else {
+            AppLog.error("no Codex CLI found on \(ToolchainPaths.value)", category: .continuation)
         }
         return fallback
     }
@@ -933,7 +956,8 @@ final class ResumeScheduler: ObservableObject {
     private static func childEnvironment(codexHome: URL) -> [String: String] {
         let inherited = ProcessInfo.processInfo.environment
         var environment: [String: String] = [
-            "PATH": inherited["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin",
+            // Not the app's own PATH: launchd's minimal PATH cannot run an npm-installed CLI.
+            "PATH": ToolchainPaths.value,
             "HOME": inherited["HOME"] ?? FileManager.default.homeDirectoryForCurrentUser.path,
             "CODEX_HOME": codexHome.path
         ]
@@ -946,14 +970,7 @@ final class ResumeScheduler: ObservableObject {
 
     /// Resolves a binary through `PATH` without spawning a shell.
     private static func locateOnPATH(_ name: String) -> Bool {
-        let paths = (ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin")
-            .split(separator: ":")
-            .map(String.init)
-        for path in paths {
-            let candidate = URL(fileURLWithPath: path).appendingPathComponent(name).path
-            if FileManager.default.isExecutableFile(atPath: candidate) { return true }
-        }
-        return false
+        ToolchainPaths.locate(name) != nil
     }
 
     // MARK: - Notifications

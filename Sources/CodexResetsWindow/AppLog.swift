@@ -51,12 +51,25 @@ enum AppLog {
         guard let directory else { return }
         let url = directory.appendingPathComponent("CodexResetsWindow.log")
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        // A menu-bar app runs for months. Keep one bounded previous file so a failure can still be
+        // read after a restart without letting the log grow without limit.
+        rotateIfNeeded(url)
         if !FileManager.default.fileExists(atPath: url.path) {
             try? Data().write(to: url)
         }
         fileHandle = try? FileHandle(forWritingTo: url)
         fileHandle?.seekToEndOfFile()
         fileURL = url
+    }
+
+    private static let maxLogBytes: UInt64 = 1_000_000
+
+    private static func rotateIfNeeded(_ url: URL) {
+        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+        guard let size = attributes?[.size] as? UInt64, size >= maxLogBytes else { return }
+        let previous = url.appendingPathExtension("1")
+        try? FileManager.default.removeItem(at: previous)
+        try? FileManager.default.moveItem(at: url, to: previous)
     }
 
     static func debug(_ message: String, category: Category = .app) { emit(.debug, category, message) }

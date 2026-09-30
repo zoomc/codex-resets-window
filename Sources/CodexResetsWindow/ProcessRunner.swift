@@ -66,7 +66,7 @@ final class SystemProcessLauncher: ProcessLaunching, @unchecked Sendable {
     private static func safeEnvironment() -> [String: String] {
         let inherited = ProcessInfo.processInfo.environment
         var result: [String: String] = [
-            "PATH": inherited["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin",
+            "PATH": ToolchainPaths.value,
             "HOME": inherited["HOME"] ?? FileManager.default.homeDirectoryForCurrentUser.path
         ]
         for key in ["TMPDIR", "LANG", "LC_ALL", "LC_CTYPE", "SSH_AUTH_SOCK",

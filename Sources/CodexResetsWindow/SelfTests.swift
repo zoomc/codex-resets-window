@@ -21,6 +21,8 @@ enum SelfTests {
             ("missingSessionFailsOnce", testMissingSessionFailsOnce),
             ("queuedScheduleTracksResetChanges", testQueuedScheduleTracksResetChanges),
             ("resetReachedRunDoesNotMove", testResetReachedRunDoesNotMove),
+            ("childInheritsToolchainPath", testChildInheritsToolchainPath),
+            ("toolchainPathIsWellFormed", testToolchainPathIsWellFormed),
             ("concurrencyLimit", testConcurrencyLimit),
             ("watchdogTerminatesHungRun", testWatchdogTerminatesHungRun),
             ("stopDoesNotRetry", testStopDoesNotRetry),
@@ -283,6 +285,45 @@ enum SelfTests {
 
     /// Regression: a refresh landing between the reset and the delayed fire must not move the
     /// run to the next window, or the continuation perpetually recedes and never runs.
+    /// Regression: the child used to inherit launchd's minimal PATH, so an npm-installed
+    /// `#!/usr/bin/env node` codex exited 127 before it could do anything.
+    private static func testChildInheritsToolchainPath(_ runner: inout TestRunner) async {
+        let clock = MutableClock(startingAt: Date(timeIntervalSince1970: 1_800_000_000))
+        var config = makeConfig()
+        // Pin the executable so the case does not depend on codex being installed on the test host.
+        config.codexExecutableOverride = "/usr/bin/env"
+        let launcher = FakeProcessLauncher()
+        let session = makeSession()
+        launcher.setOutcome(.init(exitCodes: [0], duration: 0, writesTranscriptEvents: false), for: session.id)
+        let scheduler = makeScheduler(config: config, clock: clock, launcher: launcher, sessions: [session])
+
+        scheduler.runNow(session.id)
+        let childPath = launcher.launchedRequests.first?.request.environment["PATH"]
+        runner.expectEqual(childPath, ToolchainPaths.value,
+                           "the resumed CLI gets the resolved toolchain PATH, not launchd's minimal one")
+        runner.expect(childPath?.contains("/usr/bin") == true, "the child PATH still contains /usr/bin")
+        runner.expect(ToolchainPaths.locate("env") != nil, "the resolved PATH can locate a system binary")
+    }
+
+    /// The resolved PATH must be duplicate-free and contain only real directories.
+    private static func testToolchainPathIsWellFormed(_ runner: inout TestRunner) {
+        let entries = ToolchainPaths.entries()
+        runner.expectFalse(entries.isEmpty, "the resolved PATH is not empty")
+        runner.expectEqual(entries.count, Set(entries).count, "the resolved PATH has no duplicates")
+        for entry in entries {
+            var isDirectory: ObjCBool = false
+            let exists = FileManager.default.fileExists(atPath: entry, isDirectory: &isDirectory)
+            if !exists || !isDirectory.boolValue {
+                runner.expect(false, "PATH entry does not exist: \(entry)")
+                return
+            }
+        }
+        runner.expect(true, "every PATH entry is an existing directory")
+        for system in ToolchainPaths.systemDirectories {
+            runner.expect(ToolchainPaths.value.contains(system), "the resolved PATH keeps \(system)")
+        }
+    }
+
     private static func testResetReachedRunDoesNotMove(_ runner: inout TestRunner) {
         let start = Date(timeIntervalSince1970: 1_800_000_000)
         let clock = MutableClock(startingAt: start)
