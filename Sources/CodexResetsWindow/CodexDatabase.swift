@@ -75,7 +75,14 @@ enum CodexDatabase {
         return candidates.sorted { lhs, rhs in modifiedAt(lhs) > modifiedAt(rhs) }.first
     }
 
-    /// Active threads, most recently updated first.
+    /// Human-initiated threads, most recently updated first.
+    ///
+    /// `thread_source = 'subagent'` rows are Codex's own internal child tasks (an agent spawning
+    /// `/root/audit_validation` and friends). They have no user message and an empty title, so they
+    /// surface as a wall of identical "Untitled session" rows and cannot be meaningfully continued
+    /// from here. `has_user_event` is not a usable substitute — it is 0 for real user threads too —
+    /// so the source column is the reliable discriminator. The `IS NULL` arm keeps older databases
+    /// that predate the column.
     static func readThreads(codexHome: URL, limit: Int = defaultLimit) -> [ThreadRecord] {
         guard let database = databaseURL(codexHome: codexHome) else { return [] }
         let sql = """
@@ -86,6 +93,7 @@ enum CodexDatabase {
                rollout_path
         FROM threads
         WHERE archived = 0
+          AND (thread_source IS NULL OR thread_source <> 'subagent')
         ORDER BY updated_ms DESC
         LIMIT \(limit);
         """
