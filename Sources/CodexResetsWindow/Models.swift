@@ -82,6 +82,10 @@ struct ResumeActivity: Codable, Equatable, Sendable {
     let outcome: ContinuationOutcome
     /// Whether the schedule came from a reset observation or an explicit user action.
     let trigger: ResumeTrigger
+    /// Whether the `codex queue` fallback has already been tried for this record. A resume that
+    /// fails because the thread is open elsewhere (Codex Desktop holds the writer lock) fails
+    /// identically on every retry, so the fallback runs at most once per arming.
+    let liveQueued: Bool
 
     init(
         state: ResumeRunState,
@@ -93,7 +97,8 @@ struct ResumeActivity: Codable, Equatable, Sendable {
         attempt: Int = 1,
         nextAttemptAt: Date? = nil,
         outcome: ContinuationOutcome = .none,
-        trigger: ResumeTrigger = .reset
+        trigger: ResumeTrigger = .reset,
+        liveQueued: Bool = false
     ) {
         self.state = state
         self.scheduledAt = scheduledAt
@@ -105,6 +110,7 @@ struct ResumeActivity: Codable, Equatable, Sendable {
         self.nextAttemptAt = nextAttemptAt
         self.outcome = outcome
         self.trigger = trigger
+        self.liveQueued = liveQueued
     }
 
     /// Returns a copy with selected fields replaced.
@@ -118,7 +124,8 @@ struct ResumeActivity: Codable, Equatable, Sendable {
         attempt: Int? = nil,
         nextAttemptAt: Date?? = nil,
         outcome: ContinuationOutcome? = nil,
-        trigger: ResumeTrigger? = nil
+        trigger: ResumeTrigger? = nil,
+        liveQueued: Bool? = nil
     ) -> ResumeActivity {
         ResumeActivity(
             state: state ?? self.state,
@@ -130,12 +137,13 @@ struct ResumeActivity: Codable, Equatable, Sendable {
             attempt: attempt ?? self.attempt,
             nextAttemptAt: (nextAttemptAt ?? self.nextAttemptAt),
             outcome: outcome ?? self.outcome,
-            trigger: trigger ?? self.trigger
+            trigger: trigger ?? self.trigger,
+            liveQueued: liveQueued ?? self.liveQueued
         )
     }
 
     private enum CodingKeys: String, CodingKey {
-        case state, scheduledAt, startedAt, finishedAt, lastOutput, exitCode, attempt, nextAttemptAt, outcome, trigger
+        case state, scheduledAt, startedAt, finishedAt, lastOutput, exitCode, attempt, nextAttemptAt, outcome, trigger, liveQueued
     }
 
     init(from decoder: Decoder) throws {
@@ -150,6 +158,7 @@ struct ResumeActivity: Codable, Equatable, Sendable {
         nextAttemptAt = try? container.decode(Date.self, forKey: .nextAttemptAt)
         outcome = (try? container.decode(ContinuationOutcome.self, forKey: .outcome)) ?? .none
         trigger = (try? container.decode(ResumeTrigger.self, forKey: .trigger)) ?? .reset
+        liveQueued = (try? container.decode(Bool.self, forKey: .liveQueued)) ?? false
     }
 }
 

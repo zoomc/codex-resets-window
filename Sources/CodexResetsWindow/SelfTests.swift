@@ -23,6 +23,7 @@ enum SelfTests {
             ("resetReachedRunDoesNotMove", testResetReachedRunDoesNotMove),
             ("childInheritsToolchainPath", testChildInheritsToolchainPath),
             ("toolchainPathIsWellFormed", testToolchainPathIsWellFormed),
+            ("activeWriterFallsBackToQueue", testActiveWriterFallsBackToQueue),
             ("concurrencyLimit", testConcurrencyLimit),
             ("watchdogTerminatesHungRun", testWatchdogTerminatesHungRun),
             ("stopDoesNotRetry", testStopDoesNotRetry),
@@ -322,6 +323,41 @@ enum SelfTests {
         for system in ToolchainPaths.systemDirectories {
             runner.expect(ToolchainPaths.value.contains(system), "the resolved PATH keeps \(system)")
         }
+    }
+
+    /// Regression: `exec resume` against a thread held open elsewhere fails with the writer
+    /// lock error on every attempt. The scheduler must hand the prompt to the live session with
+    /// `codex queue` exactly once instead of burning the retry budget on the same failure.
+    private static func testActiveWriterFallsBackToQueue(_ runner: inout TestRunner) async {
+        let clock = MutableClock(startingAt: Date(timeIntervalSince1970: 1_800_000_000))
+        var config = makeConfig()
+        // Pin the executable so the case does not depend on codex being installed on the host.
+        config.codexExecutableOverride = "/bin/echo"
+        let launcher = FakeProcessLauncher()
+        let session = makeSession()
+        launcher.setOutcome(.init(
+            exitCodes: [1, 0],
+            duration: 0,
+            writesTranscriptEvents: false,
+            errorText: "Error: thread/resume: thread/resume failed: thread \(session.id) already has an active writer (code -32600)"
+        ), for: session.id)
+        let scheduler = makeScheduler(config: config, clock: clock, launcher: launcher, sessions: [session])
+
+        scheduler.runNow(session.id)
+        launcher.advance(by: 1)
+        await settle()
+        let launches = launcher.launchedRequests
+        runner.expectEqual(launches.count, 2, "resume fails once, then the queue fallback fires")
+        let queued = launches.last?.request.arguments ?? []
+        runner.expect(queued.first == "queue", "the fallback invokes `codex queue`")
+        runner.expect(queued.contains("--thread"), "the fallback names the thread")
+        runner.expect(queued.contains(session.id), "the fallback targets the armed session")
+        runner.expect(queued.contains("continue"), "the fallback carries the continuation prompt")
+        launcher.advance(by: 1)
+        await settle()
+        runner.expectEqual(scheduler.activity(for: session)?.state, .succeeded,
+                           "a delivered prompt completes the one-shot record")
+        runner.expectFalse(scheduler.isEnabled(session), "delivery disarms the switch")
     }
 
     private static func testResetReachedRunDoesNotMove(_ runner: inout TestRunner) {

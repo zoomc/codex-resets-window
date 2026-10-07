@@ -549,6 +549,16 @@ final class ResumeScheduler: ObservableObject {
         deadlines.removeValue(forKey: sessionID)
         writeLedger()
 
+        // `exec resume` against a thread that is open elsewhere (Codex Desktop holds the
+        // writer lock on the shared daemon) fails identically on every attempt. Hand the prompt
+        // to the live session with `codex queue` instead — once per arming.
+        if outcome == .exitCode,
+           let previous, !previous.liveQueued,
+           let raw = previous.lastOutput, Self.isActiveWriterLocked(raw) {
+            launchQueueFallback(sessionID: sessionID, attempt: attempt)
+            return
+        }
+
         let message: String = {
             if let detail, !detail.isEmpty { return TextFormat.lastMeaningfulLine(detail) ?? outcome.label }
             if let exitCode { return Self.failureMessage(exitCode: exitCode, lastOutput: previous?.lastOutput) }
@@ -615,6 +625,106 @@ final class ResumeScheduler: ObservableObject {
         }
         if let tail, !tail.isEmpty { return "\(tail) (exit \(exitCode))" }
         return "Exited with code \(exitCode)"
+    }
+
+    /// True when the child's own words say another process owns the thread.
+    private static func isActiveWriterLocked(_ output: String) -> Bool {
+        output.localizedCaseInsensitiveContains("active writer")
+    }
+
+    /// Sends the continuation prompt to a session that is alive on the local daemon via
+    /// `codex queue`, for the case where `exec resume` cannot attach because Codex Desktop (or
+    /// another CLI) already holds the thread's writer lock.
+    ///
+    /// Delivery — not completion — is the success criterion here: the live session runs the work
+    /// and its transcript shows the progress, while this one-shot record disarms. A failed queue
+    /// falls through to the normal bounded-retry path with `liveQueued` set, so the fallback is
+    /// never attempted twice for one arming.
+    private func launchQueueFallback(sessionID: String, attempt: Int) {
+        let now = clock.now()
+        guard let executable = codexExecutable() else {
+            handleFailure(sessionID: sessionID, exitCode: nil, outcome: .missingCLI, detail: nil)
+            return
+        }
+        let prompt: String
+        if let session = sessionByID[sessionID] {
+            prompt = buildPrompt(for: session)
+        } else {
+            prompt = config.continuationPrompt
+        }
+        var arguments: [String] = []
+        if executable == "/usr/bin/env" { arguments.append("codex") }
+        // `queue` talks to the daemon that owns the thread; no working directory is involved.
+        arguments += ["queue", "--thread", sessionID, "--message", prompt]
+
+        transition(sessionID, to: (activities[sessionID] ?? ResumeActivity(state: .starting))
+            .replacing(state: .running, lastOutput: "Thread is open elsewhere; sending the prompt to the live session…",
+                       attempt: attempt, liveQueued: true))
+        AppLog.info("queueing continuation for \(sessionID) to its live session", category: .continuation)
+
+        let request = LaunchRequest(
+            sessionID: sessionID,
+            executable: executable,
+            arguments: arguments,
+            workingDirectory: nil,
+            environment: Self.childEnvironment(codexHome: config.codexHome)
+        )
+        do {
+            let process = try launcher.launch(request: request) { [weak self] text in
+                Task { @MainActor in self?.recordOutput(text, for: sessionID, attempt: attempt) }
+            } onExit: { [weak self] code in
+                Task { @MainActor in self?.completeQueueFallback(sessionID: sessionID, exitCode: code, attempt: attempt) }
+            }
+            processes[sessionID] = process
+            // A queue delivery answers in seconds. Cap it well below the run watchdog so a stuck
+            // daemon call cannot occupy the concurrency slot; expiry returns to normal retries.
+            deadlines[sessionID] = now.addingTimeInterval(120)
+            writeLedger()
+        } catch {
+            handleFailure(sessionID: sessionID, exitCode: nil, outcome: .launchError, detail: error.localizedDescription)
+        }
+    }
+
+    private func completeQueueFallback(sessionID: String, exitCode: Int32, attempt: Int) {
+        guard let activity = activities[sessionID], activity.attempt == attempt,
+              activity.liveQueued, activity.state == .running else {
+            if let process = processes[sessionID], !process.isRunning {
+                processes.removeValue(forKey: sessionID)
+                deadlines.removeValue(forKey: sessionID)
+                writeLedger()
+                startDueContinuations()
+            }
+            AppLog.info("ignoring stale queue exit \(exitCode) for \(sessionID) attempt \(attempt)",
+                        category: .continuation)
+            return
+        }
+        processes.removeValue(forKey: sessionID)
+        deadlines.removeValue(forKey: sessionID)
+        writeLedger()
+        if exitCode == 0 {
+            let previous = activities[sessionID]
+            transition(sessionID, to: ResumeActivity(
+                state: .succeeded,
+                scheduledAt: previous?.scheduledAt,
+                startedAt: previous?.startedAt,
+                finishedAt: clock.now(),
+                lastOutput: "Sent “\(config.continuationPrompt)” to the live session",
+                exitCode: 0,
+                attempt: attempt,
+                outcome: .none,
+                trigger: previous?.trigger ?? .reset,
+                liveQueued: true
+            ))
+            AppLog.info("continuation for \(sessionID) delivered to its live session", category: .continuation)
+            notify(title: "Codex Resets Window",
+                   body: "The session is open in Codex, so the prompt was sent to it directly.",
+                   identifier: "\(sessionID).queued-live",
+                   urgent: false)
+            remove(sessionID, keepActivity: true)
+        } else {
+            handleFailure(sessionID: sessionID, exitCode: exitCode, outcome: .exitCode, detail: nil)
+        }
+        startDueContinuations()
     }
 
     // MARK: - Watchdog

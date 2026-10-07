@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- When `exec resume` fails because the thread is open elsewhere (Codex Desktop holds the writer
+  lock), the continuation is delivered to the live session with `codex queue` instead of burning
+  retries on the same failure. Failure messages now surface the child's own last line, so exit 127
+  reads as a missing runtime instead of a bare code.
 - Added measured per-session and aggregate token totals from local `token_count` transcript events,
   while keeping official quota percentages separate and clearly labelled.
 - Hardened continuation state observation, reset-time rescheduling, strict usage validation,

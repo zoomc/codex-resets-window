@@ -91,7 +91,9 @@ JSON
 JSON
 
   # A stub CLI. Behaviour is switched by writing $SANDBOX/state/mode:
-  #   ok | fail | flaky | hang
+  #   ok | fail | flaky | hang | locked
+  # `locked` fails only the first launch with the writer-lock error a live Codex session
+  # produces, so later launches (the `queue` fallback) succeed.
   cat > "$SANDBOX/bin/codex" <<STUB
 #!/usr/bin/env bash
 SANDBOX="$SANDBOX"
@@ -110,6 +112,13 @@ case "\$mode" in
   fail)  exit 7 ;;
   flaky) [[ \$n -lt 3 ]] && exit 7; exit 0 ;;
   hang)  sleep 3600 ;;
+  locked)
+    if [[ \$n -lt 2 ]]; then
+      echo "Error: thread/resume: thread/resume failed: thread already has an active writer (code -32600)" >&2
+      exit 1
+    fi
+    exit 0
+    ;;
 esac
 exit 0
 STUB
@@ -251,13 +260,22 @@ note "$out"
 check "the continuation fired once the reset delay elapsed" "$(launch_count)" "1"
 check_contains "run marked Completed" "$out" "Completed"
 
-step "8. Custom prompt reaches the child"
+step "8. A thread held open elsewhere falls back to queue"
+reset_stub; echo locked > "$SANDBOX/state/mode"
+reset_state
+out=$(env_for "$BIN" --simulate 8 "run=$SESSION_A" 2>&1)
+note "$out"
+check "resume fails once, then the queue fallback fires" "$(launch_count)" "2"
+check_contains "the fallback queues to the live session" "$(cli_log)" "queue --thread $SESSION_A"
+check_contains "delivery completes the record" "$out" "Completed"
+
+step "9. Custom prompt reaches the child"
 reset_stub; echo ok > "$SANDBOX/state/mode"
 reset_state
 env_for CRW_PROMPT="please carry on" "$BIN" --simulate 4 "run=$SESSION_A" >/dev/null 2>&1
 check_contains "the configured prompt is passed through" "$(cli_log)" "please carry on"
 
-step "9. The real UserDefaults suite is untouched"
+step "10. The real UserDefaults suite is untouched"
 leaked=$(defaults read com.codexresets.window scheduledSessionIDs 2>/dev/null | head -1)
 if [[ -z "$leaked" ]]; then
   ok "no continuation state written to the shared suite"

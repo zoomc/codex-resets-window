@@ -109,15 +109,20 @@ final class FakeProcessLauncher: ProcessLaunching, @unchecked Sendable {
         var writesTranscriptEvents: Bool
         /// When true the fake never exits, forcing the watchdog to fire.
         var hangs: Bool
+        /// Fixed stderr line emitted on every finish, instead of the default filler. Used to
+        /// simulate CLI failures whose diagnosis lives in the child's own words.
+        var errorText: String?
 
         init(exitCodes: [Int32] = [0],
              duration: TimeInterval = 0,
              writesTranscriptEvents: Bool = true,
-             hangs: Bool = false) {
+             hangs: Bool = false,
+             errorText: String? = nil) {
             self.exitCodes = exitCodes
             self.duration = duration
             self.writesTranscriptEvents = writesTranscriptEvents
             self.hangs = hangs
+            self.errorText = errorText
         }
 
         func exitCode(forAttempt attempt: Int) -> Int32 {
@@ -279,7 +284,7 @@ final class FakeProcessLauncher: ProcessLaunching, @unchecked Sendable {
             _isRunning = false
             _forced = forced
             lock.unlock()
-            if !forced { onOutput?("fake codex output for \(sessionID)") }
+            if !forced { onOutput?(outcome.errorText ?? "fake codex output for \(sessionID)") }
             onStop?(forced)
             onExit?(forced ? SIGKILLTerminationStatus : outcome.exitCode(forAttempt: attempt))
         }
